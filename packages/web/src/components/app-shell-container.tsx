@@ -82,7 +82,7 @@ export const AppShellContainer = memo(function AppShellContainer({ children }: {
   const isBootProject = projectId !== null && projectId === bootProjectId
   const activeProject = registry?.projects.find((project) => project.id === projectId)
   const titleRunId = titleContext.taskId
-  const titleRun = useProjectRuns(
+  const titleLabel = useProjectRuns(
     projectId ?? '',
     // Wait for the registry to identify the project before choosing the boot/non-boot cache
     // key. Health can arrive first; fetching then would briefly populate a project-scoped key
@@ -90,7 +90,10 @@ export const AppShellContainer = memo(function AppShellContainer({ children }: {
     activeProject !== undefined && titleRunId !== null,
     registry?.bootProject === projectId,
     useMemo(
-      () => (list) => (titleRunId ? list.find((run) => run.id === titleRunId) : undefined),
+      () => (list) => {
+        const run = titleRunId ? list.find((item) => item.id === titleRunId) : undefined
+        return run ? runTitle(run) : undefined
+      },
       [titleRunId],
     ),
   ).data
@@ -103,7 +106,7 @@ export const AppShellContainer = memo(function AppShellContainer({ children }: {
     ? null
     : (activeProject?.name ??
       (isBootProject ? (repoChipOf(health.data)?.name ?? null) : null))
-  const pageLabel = titleRun ? runTitle(titleRun) : titleContext.pageLabel
+  const pageLabel = titleLabel ?? titleContext.pageLabel
 
   useDocumentTitle({ projectName, pageLabel })
 
