@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createUsageStore, type UsageStore } from './events'
-import { GlobalEventsProvider, useGlobalEvents, useRunUsage, useUsage } from './global-events'
+import { GlobalEventsProvider, RUN_EVENT_BATCH_MS, useGlobalEvents, useRunUsage, useUsage } from './global-events'
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import { createQueryClient } from './query-client'
 import { queryKeys, useProviderStatus, workspaceQueryKeys } from './queries'
@@ -116,6 +116,12 @@ const CONNECTED_PROVIDERS: ProviderStatusResponse = {
  *  stamp riding along, which the parser strips back off before the reducers see it. */
 function stampedRun(record: RunRecord, project = BOOT): string {
   return JSON.stringify({ ...record, project })
+}
+
+async function flushRunEvents(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => setTimeout(resolve, RUN_EVENT_BATCH_MS + 5))
+  })
 }
 
 let client: QueryClient
@@ -249,11 +255,12 @@ describe('useGlobalEvents — back/forward cache', () => {
 })
 
 describe('useGlobalEvents — run events', () => {
-  it('upserts a run into the list cache without refetching', () => {
+  it('upserts a run into the list cache without refetching', async () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
     source.emit('run', stampedRun(runRecord('r1', { status: 'queued' })))
+    await flushRunEvents()
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([
       runRecord('r1', { status: 'queued' }),
@@ -262,13 +269,14 @@ describe('useGlobalEvents — run events', () => {
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('updates in place on a second event for the same run — no duplicate row', () => {
+  it('updates in place on a second event for the same run — no duplicate row', async () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
     source.emit('run', stampedRun(runRecord('r1', { status: 'queued' })))
     source.emit('run', stampedRun(runRecord('r1', { status: 'running', tokensUsed: 42 })))
     source.emit('run', stampedRun(runRecord('r1', { status: 'done', tokensUsed: 99 })))
+    await flushRunEvents()
 
     const list = client.getQueryData<ApiRun[]>(queryKeys.runs.list())
     expect(list).toHaveLength(1)
@@ -276,12 +284,13 @@ describe('useGlobalEvents — run events', () => {
     expect(list?.[0]?.tokensUsed).toBe(99)
   })
 
-  it('patches a run detail cache that exists, and creates none that does not', () => {
+  it('patches a run detail cache that exists, and creates none that does not', async () => {
     client.setQueryData<ApiRun>(queryKeys.runs.detail('r1'), { ...runRecord('r1'), usage: SAMPLE })
     const { source } = mount()
 
     source.emit('run', stampedRun(runRecord('r1', { status: 'done' })))
     source.emit('run', stampedRun(runRecord('r2', { status: 'done' })))
+    await flushRunEvents()
 
     const detail = client.getQueryData<ApiRun>(queryKeys.runs.detail('r1'))
     expect(detail?.status).toBe('done')
@@ -291,7 +300,7 @@ describe('useGlobalEvents — run events', () => {
     expect(client.getQueryData(queryKeys.runs.detail('r2'))).toBeUndefined()
   })
 
-  it('invalidates the changes cache on a run event so an ended run’s final writes appear (#488)', () => {
+  it('invalidates the changes cache on a run event so an ended run’s final writes appear (#488)', async () => {
     // The Changes tab stops polling the moment a run leaves the active set, so without this the
     // last diff would wait for the next SSE reconnect. A cache the user opened must refresh.
     client.setQueryData(queryKeys.runs.changes('r1'), { files: [], stat: { adds: 0, dels: 0, files: 0 } })
@@ -299,6 +308,7 @@ describe('useGlobalEvents — run events', () => {
     const { source } = mount()
 
     source.emit('run', stampedRun(runRecord('r1', { status: 'done' })))
+    await flushRunEvents()
 
     expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.runs.changes('r1') })
   })
@@ -358,7 +368,7 @@ describe('useGlobalEvents — run events', () => {
     expect(indexRefreshes).toHaveLength(1)
   })
 
-  it('ignores a malformed frame and keeps serving the next one', () => {
+  it('ignores a malformed frame and keeps serving the next one', async () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
 
@@ -367,16 +377,18 @@ describe('useGlobalEvents — run events', () => {
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
 
     source.emit('run', stampedRun(runRecord('r1')))
+    await flushRunEvents()
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toHaveLength(1)
   })
 
-  it('drops a deleted run from the list and throws away its detail and diff caches', () => {
+  it('drops a deleted run from the list and throws away its detail and diff caches', async () => {
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [runRecord('r1'), runRecord('r2')])
     client.setQueryData(queryKeys.runs.detail('r1'), runRecord('r1'))
     client.setQueryData(queryKeys.runs.diff('r1'), { files: [] })
     const { source } = mount()
 
     source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
+    await flushRunEvents()
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.map((r) => r.id)).toEqual(['r2'])
     // Removed, not emptied: anything still mounted on them must go ask the server and get its 404.
@@ -674,7 +686,7 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
   })
 
-  it('drops stamped events until health has named the boot project, without crashing', () => {
+  it('drops stamped events until health has named the boot project, without crashing', async () => {
     client.removeQueries({ queryKey: queryKeys.health })
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
     const { source } = mount()
@@ -686,10 +698,11 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     // Health answered — from here on the boot project's events flow.
     client.setQueryData(queryKeys.health, { bootProject: BOOT })
     source.emit('run', stampedRun(runRecord('r1')))
+    await flushRunEvents()
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toHaveLength(1)
   })
 
-  it('applies the scoped project\'s events — and only those — once a scope is mounted', () => {
+  it('applies the scoped project\'s events — and only those — once a scope is mounted', async () => {
     setApiScope('other-project')
     // Scoped keys: this cache belongs to other-project (queries.ts leads every key with the scope).
     client.setQueryData<ApiRun[]>(queryKeys.runs.list(), [])
@@ -700,6 +713,7 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
 
     source.emit('run', stampedRun(runRecord('theirs'), 'other-project'))
     source.emit('usage', JSON.stringify({ project: 'other-project', usage: { theirs: SAMPLE } }))
+    await flushRunEvents()
 
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.map((r) => r.id)).toEqual(['theirs'])
     expect(usage.get()).toEqual({ theirs: SAMPLE })

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { RunHistoryContext, RunHistoryPage } from '@open-mercato/cezar-api-client'
 import { getRunHistory, getRunHistoryContext } from './client'
-import { useRunHistory } from './run-history'
+import { mergeRunHistoryEvents, useRunHistory } from './run-history'
 
 vi.mock('./client', () => ({
   getRunHistory: vi.fn(),
@@ -76,6 +76,20 @@ beforeEach(() => {
 })
 
 describe('useRunHistory', () => {
+  it('appends a strictly newer live tail without re-sorting the retained page', () => {
+    const base = [page(1).events[0]!, page(2).events[0]!]
+    const live = [page(3).events[0]!, page(7).events[0]!]
+
+    expect(mergeRunHistoryEvents(base, live).map(({ seq }) => seq)).toEqual([1, 2, 3, 7])
+  })
+
+  it('keeps reconnect overlap safe by falling back to ordered deduplication', () => {
+    const base = [page(1).events[0]!, page(3).events[0]!]
+    const replay = [page(2).events[0]!, page(3).events[0]!, page(4).events[0]!]
+
+    expect(mergeRunHistoryEvents(base, replay).map(({ seq }) => seq)).toEqual([1, 2, 3, 4])
+  })
+
   it('hydrates the visible tail and current context independently, then prepends one older page', async () => {
     mockHistory.mockImplementation(async (_id, cursor) =>
       cursor === 'older-100'
@@ -162,6 +176,7 @@ describe('useRunHistory', () => {
     })
 
     await waitFor(() => expect(mockHistory).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(result.current.retainedPages).toBe(1))
     await waitFor(() => expect(result.current.visibleEvents.at(-1)?.seq).toBe(300))
     expect(result.current.visibleEvents).toHaveLength(100)
     expect(result.current.visibleEvents[0]?.seq).toBe(201)

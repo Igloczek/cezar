@@ -26,6 +26,13 @@ import type { RunEvent } from '@open-mercato/cezar-api-client'
 export const RUN_EVENT_NAMES = ['run-event', 'ui-event'] as const
 
 /**
+ * EventSource delivers token/delta frames as separate tasks. Rendering once per frame makes a
+ * transcript rebuild the whole visible thread at agent-event rate, so publish at most one batch
+ * every 50 ms. This is below a normal typing frame while bounding React work during fast streams.
+ */
+export const RUN_EVENT_BATCH_MS = 50
+
+/**
  * Parse one SSE frame into a `RunEvent`, or null for anything malformed. Null rather than a
  * throw, as everywhere on the stream boundary: one bad frame costs one frame, not the socket.
  * `seq` must be a number — it is the dedup axis, and a line without one cannot be ordered.
@@ -81,6 +88,8 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
     let reopenTimer: ReturnType<typeof setTimeout> | undefined
     let disposed = false
     let compactionRequested = false
+    let pending: RunEvent[] = []
+    let flushTimer: ReturnType<typeof setTimeout> | undefined
     const CLOSED = 2 // EventSource.CLOSED, spelled literally like global-events.tsx
     const REOPEN_DELAY_MS = 1_500
 
@@ -95,15 +104,13 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
     let lastFrameAt = Date.now()
     let livenessTimer: ReturnType<typeof setInterval> | undefined
 
-    const onFrame = (event: Event) => {
-      // Any frame proves the socket is alive — bump the watchdog before the dedup drop, so a
-      // replayed prefix (which is dropped below) still counts as liveness.
-      lastFrameAt = Date.now()
-      const parsed = parseRunEvent((event as MessageEvent<string>).data)
-      if (!parsed || !(parsed.seq > maxSeq)) return
-      maxSeq = parsed.seq
+    const flush = (): void => {
+      flushTimer = undefined
+      if (pending.length === 0) return
+      const batch = pending
+      pending = []
       setEvents((current) => {
-        const next = [...current, parsed]
+        const next = [...current, ...batch]
         if (
           !compactionRequested &&
           compactAt !== undefined &&
@@ -116,6 +123,21 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
         }
         return maxEvents === undefined || next.length <= maxEvents ? next : next.slice(-maxEvents)
       })
+    }
+
+    const scheduleFlush = (): void => {
+      if (flushTimer === undefined) flushTimer = setTimeout(flush, RUN_EVENT_BATCH_MS)
+    }
+
+    const onFrame = (event: Event) => {
+      // Any frame proves the socket is alive — bump the watchdog before the dedup drop, so a
+      // replayed prefix (which is dropped below) still counts as liveness.
+      lastFrameAt = Date.now()
+      const parsed = parseRunEvent((event as MessageEvent<string>).data)
+      if (!parsed || !(parsed.seq > maxSeq)) return
+      maxSeq = parsed.seq
+      pending.push(parsed)
+      scheduleFlush()
     }
 
     // The keepalive carries no payload we accumulate — it exists only to prove the socket is
@@ -204,6 +226,9 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
     return () => {
       disposed = true
       clearTimeout(reopenTimer)
+      clearTimeout(flushTimer)
+      flushTimer = undefined
+      pending = []
       clearInterval(livenessTimer)
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pagehide', onPageHide)

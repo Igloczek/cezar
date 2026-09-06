@@ -10,12 +10,30 @@ const MAX_HISTORY_PAGES = 5
 const COMPACT_LIVE_AT_EVENTS = 200
 const MAX_LIVE_EVENTS = 5_000
 
-function orderedUnique(...groups: readonly RunEvent[][]): RunEvent[] {
+function orderedUnique(...groups: readonly (readonly RunEvent[])[]): RunEvent[] {
   const bySeq = new Map<number, RunEvent>()
   for (const group of groups) {
     for (const event of group) bySeq.set(event.seq, event)
   }
   return [...bySeq.values()].sort((a, b) => a.seq - b.seq)
+}
+
+/**
+ * The optimized stream is append-only between history compactions. Keep that hot path linear and
+ * preserve the old dedup/sort fallback for reconnects or a page replacement that overlaps it.
+ */
+export function mergeRunHistoryEvents(
+  base: readonly RunEvent[],
+  live: readonly RunEvent[],
+): RunEvent[] {
+  if (live.length === 0) return base.slice()
+  const lastSeq = base.at(-1)?.seq ?? -Infinity
+  let previous = lastSeq
+  for (const event of live) {
+    if (event.seq <= previous) return orderedUnique(base, live)
+    previous = event.seq
+  }
+  return base.length === 0 ? [...live] : [...base, ...live]
 }
 
 export interface RunHistoryState {
@@ -124,7 +142,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     [pages],
   )
   const visibleEvents = useMemo(
-    () => fallback ? fallbackEvents : orderedUnique(pagedEvents, liveEvents),
+    () => fallback ? fallbackEvents : mergeRunHistoryEvents(pagedEvents, liveEvents),
     [fallback, fallbackEvents, pagedEvents, liveEvents],
   )
   const currentEvents = useMemo(() => {

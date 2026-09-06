@@ -108,6 +108,9 @@ export function onWorkspaceEvent(
  */
 const RUNS_INDEX_REFRESH_DEBOUNCE_MS = 400
 
+/** A live run can touch its summary several times while one transcript batch is arriving. */
+export const RUN_EVENT_BATCH_MS = 50
+
 /** Built per mount, not module-level: a pending timer holds the `queryClient` it will write to,
  *  and one that outlives its provider would invalidate a cache nobody is reading. `cancel` runs
  *  in the effect cleanup. */
@@ -128,6 +131,41 @@ function createRunsIndexRefresher(queryClient: QueryClient): {
     cancel() {
       clearTimeout(pending)
       pending = undefined
+    },
+  }
+}
+
+/**
+ * Coalesce global run summaries before touching the query cache. The sidebar needs live status,
+ * but it does not need one React notification per token/usage update.
+ */
+function createRunEventBatcher(queryClient: QueryClient, usage: UsageStore): {
+  onEvent: (event: Extract<GlobalEvent, { type: 'run' | 'run-deleted' }>) => void
+  cancel: () => void
+} {
+  let pending = new Map<string, Extract<GlobalEvent, { type: 'run' | 'run-deleted' }>>()
+  let timer: ReturnType<typeof setTimeout> | undefined
+
+  const flush = (): void => {
+    timer = undefined
+    const events = [...pending.values()]
+    pending = new Map()
+    for (const event of events) applyGlobalEvent(queryClient, usage, event)
+  }
+
+  const schedule = (): void => {
+    if (timer === undefined) timer = setTimeout(flush, RUN_EVENT_BATCH_MS)
+  }
+
+  return {
+    onEvent(event) {
+      pending.set(event.type === 'run' ? event.run.id : event.id, event)
+      schedule()
+    },
+    cancel() {
+      clearTimeout(timer)
+      timer = undefined
+      pending.clear()
     },
   }
 }
@@ -245,6 +283,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
 
     let source: EventSource | null = null
     const runsIndexRefresher = createRunsIndexRefresher(queryClient)
+    const runEventBatcher = createRunEventBatcher(queryClient, usage)
     let reopenTimer: ReturnType<typeof setTimeout> | undefined
     let everOpened = false
     let disposed = false
@@ -304,7 +343,11 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
           // project's data only, and the reconcile-on-switch (3.2's provider swap) refetches
           // the rest. `ping` (project null) always passes — liveness is not project-owned.
           if (parsed.project !== null && parsed.project !== activeProject(queryClient)) return
-          applyGlobalEvent(queryClient, usage, parsed.event)
+          if (parsed.event.type === 'run' || parsed.event.type === 'run-deleted') {
+            runEventBatcher.onEvent(parsed.event)
+          } else {
+            applyGlobalEvent(queryClient, usage, parsed.event)
+          }
         })
       }
 
@@ -404,6 +447,7 @@ export function useGlobalEvents(usage: UsageStore, url: string = SSE_URL): void 
       disposed = true
       clearTimeout(reopenTimer)
       runsIndexRefresher.cancel()
+      runEventBatcher.cancel()
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pagehide', onPageHide)
       window.removeEventListener('pageshow', onPageShow)

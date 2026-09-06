@@ -1,6 +1,6 @@
-import { useMemo, type ReactNode } from 'react'
+import { memo, useMemo, type ReactNode } from 'react'
 
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import type { ApiRun, UiToolItem } from '@open-mercato/cezar-api-client'
 
 import { groupThreadItems, type ThreadBlock } from './thread-groups'
 import {
@@ -224,7 +224,7 @@ function TranscriptUserBubble({
   )
 }
 
-function ThreadBlockRenderer({
+const ThreadBlockRenderer = memo(function ThreadBlockRenderer({
   block,
   scope,
   renderAsk,
@@ -260,7 +260,7 @@ function ThreadBlockRenderer({
     default:
       return assertNever(block)
   }
-}
+}, sameThreadBlockProps)
 
 function GroupedEntries({
   entries,
@@ -317,4 +317,112 @@ function ThreadEntryRenderer({
 
 function assertNever(value: never): never {
   throw new Error(`Unhandled transcript variant: ${JSON.stringify(value)}`)
+}
+
+function sameThreadBlockProps(
+  previous: { block: ThreadBlock; scope: string; renderAsk?: (ask: ThreadAsk) => ReactNode },
+  next: { block: ThreadBlock; scope: string; renderAsk?: (ask: ThreadAsk) => ReactNode },
+): boolean {
+  return (
+    previous.scope === next.scope &&
+    sameThreadBlock(previous.block, next.block) &&
+    (!containsAsk(next.block) || previous.renderAsk === next.renderAsk)
+  )
+}
+
+function containsAsk(block: ThreadBlock): boolean {
+  if (block.kind === 'entry') return block.entry.kind === 'ask'
+  if (block.kind === 'tool-card') return block.children.some((entry) => entry.kind === 'ask')
+  if (block.kind === 'context-group') return false
+  return block.blocks.some(containsAsk)
+}
+
+function sameThreadBlock(previous: ThreadBlock, next: ThreadBlock): boolean {
+  if (previous.kind !== next.kind || previous.id !== next.id) return false
+  switch (next.kind) {
+    case 'entry':
+      return sameThreadEntry(previous.kind === 'entry' ? previous.entry : undefined, next.entry)
+    case 'tool-card':
+      return (
+        previous.kind === 'tool-card' &&
+        sameToolItem(previous.item, next.item) &&
+        sameThreadEntries(previous.children, next.children)
+      )
+    case 'context-group':
+      return (
+        previous.kind === 'context-group' &&
+        previous.files === next.files &&
+        previous.searches === next.searches &&
+        previous.label === next.label &&
+        previous.tools.length === next.tools.length &&
+        previous.tools.every((item, index) => sameToolItem(item, next.tools[index]!))
+      )
+    case 'streak':
+      return (
+        previous.kind === 'streak' &&
+        previous.count === next.count &&
+        previous.blocks.length === next.blocks.length &&
+        previous.blocks.every((block, index) => sameThreadBlock(block, next.blocks[index]!))
+      )
+    default:
+      return false
+  }
+}
+
+function sameThreadEntries(previous: readonly ThreadEntry[], next: readonly ThreadEntry[]): boolean {
+  return previous.length === next.length && previous.every((entry, index) => sameThreadEntry(entry, next[index]!))
+}
+
+function sameThreadEntry(previous: ThreadEntry | undefined, next: ThreadEntry): boolean {
+  if (previous === undefined || previous.kind !== next.kind || previous.id !== next.id) return false
+  switch (next.kind) {
+    case 'message':
+      return previous.kind === 'message' &&
+        previous.text === next.text &&
+        previous.role === next.role &&
+        previous.phase === next.phase &&
+        previous.parentItemId === next.parentItemId
+    case 'reasoning':
+      return previous.kind === 'reasoning' &&
+        previous.text === next.text &&
+        previous.parentItemId === next.parentItemId
+    case 'tool':
+      return previous.kind === 'tool' && sameToolItem(previous, next)
+    case 'note':
+      return previous.kind === 'note' && previous.text === next.text && previous.tone === next.tone
+    case 'image':
+      return previous.kind === 'image' && previous.url === next.url && previous.name === next.name
+    case 'ask':
+      return (
+        previous.kind === 'ask' &&
+        previous.resolved === next.resolved &&
+        previous.answer === next.answer &&
+        previous.questions === next.questions
+      )
+    case 'provider-auth-required':
+      return previous.kind === 'provider-auth-required' &&
+        previous.provider === next.provider &&
+        previous.authFailureId === next.authFailureId
+    default:
+      return false
+  }
+}
+
+function sameToolItem(previous: UiToolItem, next: UiToolItem): boolean {
+  return (
+    previous.kind === 'tool' &&
+    next.kind === 'tool' &&
+    previous.id === next.id &&
+    previous.name === next.name &&
+    previous.toolKind === next.toolKind &&
+    previous.title === next.title &&
+    previous.status === next.status &&
+    previous.input === next.input &&
+    previous.output === next.output &&
+    previous.error === next.error &&
+    previous.diffs === next.diffs &&
+    previous.locations === next.locations &&
+    previous.exitCode === next.exitCode &&
+    previous.parentItemId === next.parentItemId
+  )
 }
