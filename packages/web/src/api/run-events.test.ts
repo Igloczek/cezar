@@ -376,10 +376,17 @@ describe('useRunEvents — compaction handoff', () => {
     await flushEvents()
     await vi.waitFor(() => expect(onCompact).toHaveBeenCalled())
 
-    // A numeric high-water cap would silently delete live-only deltas. An empty coverage result
-    // is a successful snapshot with nothing safe to evict, so the chunks collapse losslessly.
+    // A numeric high-water cap would silently delete live-only deltas. Empty coverage keeps the
+    // chunks lossless and backs off instead of retrying on every 50 ms batch.
     expect(result.current).toHaveLength(1)
     expect(result.current[0]?.delta).toHaveLength(5_001)
+    source.emit('ui-event', line(5_002, 'item.delta', {
+      itemId: 'message-1',
+      field: 'text',
+      delta: 'y',
+    }))
+    await flushEvents()
+    expect(onCompact).toHaveBeenCalledTimes(1)
   })
 })
 

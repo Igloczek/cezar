@@ -32,6 +32,14 @@ export const RUN_EVENT_NAMES = ['run-event', 'ui-event'] as const
 export const RUN_EVENT_BATCH_MS = 50
 const COMPACTION_RETRY_BASE_MS = 1_000
 const COMPACTION_RETRY_MAX_MS = 60_000
+const MAX_SEEN_SEQS = 10_000
+
+function rememberSeq(seqs: Set<number>, seq: number): void {
+  seqs.add(seq)
+  if (seqs.size <= MAX_SEEN_SEQS) return
+  const oldest = seqs.values().next().value
+  if (typeof oldest === 'number') seqs.delete(oldest)
+}
 
 export type RunEventCompaction = readonly number[]
 
@@ -208,9 +216,9 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
         .then(
           (coveredSeqs) => {
             if (disposed) return
-            // A failed optimization must be retryable; an empty successful coverage is valid
-            // when the current live window still contains an active item with no durable snapshot.
-            if (!Array.isArray(coveredSeqs)) {
+            // Empty coverage made no progress: keep the live buffer, but back off before asking
+            // for the same snapshot on every 50 ms batch.
+            if (!Array.isArray(coveredSeqs) || coveredSeqs.length === 0) {
               markCompactionFailed()
               return
             }
@@ -227,10 +235,9 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
               // The server will resume after the compacted page's durable high-water mark.
               // Drop dedup state for the same compacted prefix so it cannot grow with a long
               // run; keep the still-live tail (and queued frames not flushed yet).
-              seenSeqsRef.current = new Set([
-                ...next.map(({ seq }) => seq),
-                ...pending.map(({ seq }) => seq),
-              ])
+              const nextSeen = new Set<number>()
+              for (const { seq } of [...next, ...pending]) rememberSeq(nextSeen, seq)
+              seenSeqsRef.current = nextSeen
               return next
             })
           },
@@ -293,7 +300,7 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
         parsed.seq <= maxSeqRef.current
         && (!allowLateFramesRef.current || parsed.seq <= initialPageHighWaterRef.current)
       ) return
-      seenSeqsRef.current.add(parsed.seq)
+      rememberSeq(seenSeqsRef.current, parsed.seq)
       maxSeqRef.current = Math.max(maxSeqRef.current, parsed.seq)
       eventsSinceCompaction += 1
       pending.push(parsed)

@@ -28,6 +28,13 @@ function isStrictlyIncreasing(events: readonly RunEvent[]): boolean {
   return true
 }
 
+function newestCursorlessPage(pages: readonly RunHistoryPage[]): RunHistoryPage | undefined {
+  for (let index = pages.length - 1; index >= 0; index -= 1) {
+    if (pages[index]!.newerCursor === undefined) return pages[index]
+  }
+  return undefined
+}
+
 /** Merge the normal ordered streams without rebuilding a map and sorting their full contents. */
 function mergeOrderedUnique(...groups: readonly (readonly RunEvent[])[]): RunEvent[] {
   if (!groups.every(isStrictlyIncreasing)) return orderedUnique(...groups)
@@ -151,17 +158,20 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     retry: 1,
   })
 
-  const fallback = history.isError || context.isError
   const pages = history.data?.pages ?? []
   const newestPageRef = useRef<RunHistoryPage | undefined>(undefined)
   const ownerKey = `${scope}\0${runId ?? ''}`
-  const ownerRef = useRef(ownerKey)
+  const ownerRef = useRef({ key: ownerKey, fallbackLatched: false })
   const historyMutationRef = useRef(Promise.resolve())
-  if (ownerRef.current !== ownerKey) {
-    ownerRef.current = ownerKey
+  const historyGenerationRef = useRef(0)
+  if (ownerRef.current.key !== ownerKey) {
+    ownerRef.current = { key: ownerKey, fallbackLatched: false }
     historyMutationRef.current = Promise.resolve()
+    historyGenerationRef.current += 1
     newestPageRef.current = undefined
   }
+  if (history.isError || context.isError) ownerRef.current.fallbackLatched = true
+  const fallback = ownerRef.current.fallbackLatched
   const enqueueHistoryMutation = useCallback(<T,>(mutation: () => Promise<T>): Promise<T> => {
     const previous = historyMutationRef.current
     let release!: () => void
@@ -170,78 +180,90 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     })
     return previous.then(mutation).finally(release)
   }, [])
-  const cachedNewestPage = pages.find((page) => page.newerCursor === undefined)
+  const cachedNewestPage = newestCursorlessPage(pages)
   const cachedTail = pages.length > 0
     ? queryClient.getQueryData<RunHistoryPage>(tailKey)
     : undefined
-  if (cachedNewestPage) newestPageRef.current = cachedNewestPage
-  else if (cachedTail) newestPageRef.current = cachedTail
+  if (cachedNewestPage && (!newestPageRef.current || cachedNewestPage.asOfSeq >= newestPageRef.current.asOfSeq)) {
+    newestPageRef.current = cachedNewestPage
+  } else if (cachedTail && (!newestPageRef.current || cachedTail.asOfSeq >= newestPageRef.current.asOfSeq)) {
+    newestPageRef.current = cachedTail
+  }
   // With maxPages, TanStack may evict the cursorless newest page while older pages remain. The
   // tail is kept outside that window so the live cursor never starts after an evicted segment.
   // The last retained page is only a final recovery for pre-existing cache shapes.
-  const newestPage = cachedNewestPage
+  const newestPage = newestPageRef.current
+    ?? cachedNewestPage
     ?? cachedTail
-    ?? (pages.length > 0 ? newestPageRef.current ?? pages.at(-1) : undefined)
+    ?? (pages.length > 0 ? pages.at(-1) : undefined)
   const compactingOwnerRef = useRef<string | undefined>(undefined)
   const compactLive = useCallback(async (liveEvents: readonly RunEvent[]): Promise<RunEventCompaction | false> => {
     if (runId === undefined || compactingOwnerRef.current === ownerKey) return false
     compactingOwnerRef.current = ownerKey
-    return enqueueHistoryMutation(async () => {
-      const controller = new AbortController()
-      let timeout: ReturnType<typeof setTimeout> | undefined
-      try {
-        const latestPage = await Promise.race<RunHistoryPage>([
-          getRunHistory(runId, undefined, { signal: controller.signal }),
-          new Promise<RunHistoryPage>((_, reject) => {
-            timeout = setTimeout(() => {
-              controller.abort()
-              reject(new Error('history compaction timed out'))
-            }, COMPACTION_TIMEOUT_MS)
-          }),
-        ])
-        if (ownerRef.current !== ownerKey) return false
-        const current = queryClient.getQueryData<InfiniteData<RunHistoryPage, string | undefined>>(historyKey)
-        // Decide and install against the same snapshot. Computing coverage before an updater can
-        // reject a stale page would remove live frames even though that page never became cache.
-        if (current?.pages.some((page) => page.asOfSeq >= latestPage.asOfSeq)) return []
-        const next: InfiniteData<RunHistoryPage, string | undefined> = current
-          ? (() => {
-            const pages = [...current.pages]
-            const pageParams = [...current.pageParams]
-            const latestIndex = pages.findIndex((page) => page.newerCursor === undefined)
-            if (latestIndex >= 0) {
-              pages[latestIndex] = latestPage
-              pageParams[latestIndex] = undefined
-            } else {
-              pages.push(latestPage)
-              pageParams.push(undefined)
-            }
-            while (pages.length > MAX_HISTORY_PAGES) {
-              pages.shift()
-              pageParams.shift()
-            }
-            return { pages, pageParams }
-          })()
-          : { pages: [latestPage], pageParams: [undefined] }
-        queryClient.setQueryData(historyKey, next)
-        queryClient.setQueryData(tailKey, latestPage)
-        newestPageRef.current = latestPage
-        return coveredLiveEventSeqs(
-          liveEvents,
-          next.pages.flatMap((page) => page.events as RunEvent[]),
-          latestPage.asOfSeq,
-        )
-      } catch {
-        // Compaction is an optimization, not a load. The live buffer remains the source of truth,
-        // and the stream re-arms its request latch so a later batch can retry.
-        return false
-      } finally {
-        clearTimeout(timeout)
-        controller.abort()
-        if (compactingOwnerRef.current === ownerKey) compactingOwnerRef.current = undefined
-      }
-    })
-  }, [enqueueHistoryMutation, historyKey, ownerKey, queryClient, runId])
+    const generation = historyGenerationRef.current
+    const controller = new AbortController()
+    let timeout: ReturnType<typeof setTimeout> | undefined
+    try {
+      const latestPage = await Promise.race<RunHistoryPage>([
+        getRunHistory(runId, undefined, { signal: controller.signal }),
+        new Promise<RunHistoryPage>((_, reject) => {
+          timeout = setTimeout(() => {
+            controller.abort()
+            reject(new Error('history compaction timed out'))
+          }, COMPACTION_TIMEOUT_MS)
+        }),
+      ])
+      if (ownerRef.current.key !== ownerKey || historyGenerationRef.current !== generation) return false
+      const current = queryClient.getQueryData<InfiniteData<RunHistoryPage, string | undefined>>(historyKey)
+      // Only the cursorless page is the current tail. Older pages can carry the same file
+      // high-water mark and must not reject a newer tail snapshot.
+      const currentTail = newestCursorlessPage(current?.pages ?? [])
+      const cachedTail = queryClient.getQueryData<RunHistoryPage>(tailKey)
+      const latestKnownAsOfSeq = Math.max(
+        currentTail?.asOfSeq ?? -Infinity,
+        cachedTail?.asOfSeq ?? -Infinity,
+        newestPageRef.current?.asOfSeq ?? -Infinity,
+      )
+      // Decide and install against the same snapshot. Computing coverage before an updater can
+      // reject a stale page would remove live frames even though that page never became cache.
+      if (latestKnownAsOfSeq >= latestPage.asOfSeq) return false
+      const next: InfiniteData<RunHistoryPage, string | undefined> = current
+        ? (() => {
+          const pages = [...current.pages]
+          const pageParams = [...current.pageParams]
+          const latestIndex = currentTail ? pages.indexOf(currentTail) : -1
+          if (latestIndex >= 0) {
+            pages[latestIndex] = latestPage
+            pageParams[latestIndex] = undefined
+          } else {
+            pages.push(latestPage)
+            pageParams.push(undefined)
+          }
+          while (pages.length > MAX_HISTORY_PAGES) {
+            pages.shift()
+            pageParams.shift()
+          }
+          return { pages, pageParams }
+        })()
+        : { pages: [latestPage], pageParams: [undefined] }
+      queryClient.setQueryData(historyKey, next)
+      queryClient.setQueryData(tailKey, latestPage)
+      newestPageRef.current = latestPage
+      return coveredLiveEventSeqs(
+        liveEvents,
+        next.pages.flatMap((page) => page.events as RunEvent[]),
+        latestPage.asOfSeq,
+      )
+    } catch {
+      // Compaction is an optimization, not a load. The live buffer remains the source of truth,
+      // and the stream re-arms its request latch so a later batch can retry.
+      return false
+    } finally {
+      clearTimeout(timeout)
+      controller.abort()
+      if (compactingOwnerRef.current === ownerKey) compactingOwnerRef.current = undefined
+    }
+  }, [historyKey, ownerKey, queryClient, runId, tailKey])
   const liveEvents = useRunEvents(newestPage && !fallback ? runId : undefined, newestPage ? {
     cursor: newestPage.liveCursor,
     afterSeq: newestPage.asOfSeq,
@@ -270,7 +292,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     [newestPage, pages],
   )
   useEffect(() => {
-    const page = pages.find((candidate) => candidate.newerCursor === undefined)
+    const page = newestCursorlessPage(pages)
     if (!page) return
     queryClient.setQueryData(tailKey, page)
   }, [pages, queryClient, runId, scope])
@@ -284,17 +306,36 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     if (fallback) return visibleEvents
     const contextEvents = (context.data?.contextEvents ?? []) as RunEvent[]
     const contextHighWater = context.data?.asOfSeq ?? 0
-    return mergeOrderedUnique(contextEvents, visibleEvents.filter(({ seq }) => seq > contextHighWater))
-  }, [context.data, fallback, visibleEvents])
+    return mergeOrderedUnique(
+      contextEvents,
+      visibleEvents.filter(({ seq }) => seq > contextHighWater),
+      liveEvents.filter(({ seq }) => seq <= contextHighWater),
+    )
+  }, [context.data, fallback, liveEvents, visibleEvents])
 
   const loadOlder = useCallback(async () => {
     const current = queryClient.getQueryData<InfiniteData<RunHistoryPage, string | undefined>>(historyKey)
-    const tail = current?.pages.find((page) => page.newerCursor === undefined)
+    const tail = newestCursorlessPage(current?.pages ?? [])
     if (tail) queryClient.setQueryData(tailKey, tail)
-    await enqueueHistoryMutation(() => history.fetchPreviousPage())
+    try {
+      await enqueueHistoryMutation(() => history.fetchPreviousPage())
+    } finally {
+      const latestTail = newestPageRef.current
+      if (!latestTail) return
+      queryClient.setQueryData<InfiniteData<RunHistoryPage, string | undefined> | undefined>(historyKey, (current) => {
+        if (!current) return current
+        const currentTail = newestCursorlessPage(current.pages)
+        const tailIndex = currentTail ? current.pages.indexOf(currentTail) : -1
+        if (tailIndex < 0 || current.pages[tailIndex]!.asOfSeq >= latestTail.asOfSeq) return current
+        const pages = [...current.pages]
+        pages[tailIndex] = latestTail
+        return { ...current, pages }
+      })
+    }
   }, [enqueueHistoryMutation, history.fetchPreviousPage, historyKey, queryClient, tailKey])
 
   const jumpToLatest = useCallback(async () => {
+    historyGenerationRef.current += 1
     await enqueueHistoryMutation(async () => {
       newestPageRef.current = undefined
       queryClient.removeQueries({ queryKey: tailKey, exact: true })

@@ -111,6 +111,24 @@ describe('useRunHistory', () => {
     expect(result.current.retainedPages).toBe(2)
   })
 
+  it('keeps late live frames in current state when context has a newer high-water mark', async () => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    mockHistory.mockResolvedValue(page(100))
+    mockContext.mockResolvedValue({ ...context(), asOfSeq: 300 })
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+
+    FakeEventSource.instances[0]!.emit(
+      'ui-event',
+      JSON.stringify({ seq: 250, ts: '2026-07-30T00:00:00.000Z', type: 'note', message: 'late-live' }),
+    )
+    await waitFor(() => expect(result.current.visibleEvents.at(-1)?.seq).toBe(250))
+    expect(result.current.currentEvents.map(({ seq }) => seq)).toEqual([90, 250])
+    vi.unstubAllGlobals()
+  })
+
   it('falls back to the protected full replay when either optimized request cannot load', async () => {
     mockHistory.mockRejectedValue(new Error('old server'))
     mockContext.mockResolvedValue(context())
@@ -176,15 +194,20 @@ describe('useRunHistory', () => {
     expect(FakeEventSource.instances.at(-1)?.url).toBe('/api/v1/runs/run-1/events?cursor=live-100&afterSeq=100')
   })
 
-  it('serializes compaction behind older-page loading so neither can overwrite the other', async () => {
+  it('refreshes the tail while older-page loading is still pending', async () => {
     FakeEventSource.instances = []
     vi.stubGlobal('EventSource', FakeEventSource)
     let resolveOlder!: (value: RunHistoryPage) => void
     const older = new Promise<RunHistoryPage>((resolve) => {
       resolveOlder = resolve
     })
+    let resolveCompacted!: (value: RunHistoryPage) => void
+    const compacted = new Promise<RunHistoryPage>((resolve) => {
+      resolveCompacted = resolve
+    })
     mockHistory.mockImplementation(async (_id, cursor) => {
       if (cursor === 'older-100') return older
+      if (cursor === undefined && mockHistory.mock.calls.length > 1) return compacted
       return page(100, { olderCursor: 'older-100', hasOlder: true })
     })
     mockContext.mockResolvedValue(context())
@@ -207,13 +230,14 @@ describe('useRunHistory', () => {
       }
     })
     await waitFor(() => expect(result.current.visibleEvents.at(-1)?.seq).toBe(300))
-    // The older fetch owns the history mutation slot; compaction has not even requested its tail
-    // snapshot yet.
-    expect(mockHistory).toHaveBeenCalledTimes(2)
+    // Compaction is independent from the older-page queue, so a stuck pagination request cannot
+    // hold the live tail hostage.
+    await waitFor(() => expect(mockHistory).toHaveBeenCalledTimes(3))
+    resolveCompacted(page(300))
+    await waitFor(() => expect(result.current.visibleEvents.at(-1)?.seq).toBe(300))
 
     resolveOlder(page(1))
     await act(async () => loadingOlder)
-    await waitFor(() => expect(mockHistory).toHaveBeenCalledTimes(3))
     expect(result.current.visibleEvents.map(({ seq }) => seq).at(0)).toBe(1)
     expect(result.current.visibleEvents.at(-1)?.seq).toBe(300)
     vi.unstubAllGlobals()
@@ -327,7 +351,7 @@ describe('useRunHistory', () => {
     })
     mockHistory.mockResolvedValue(page(100, { olderCursor: 'older-0', hasOlder: true }))
     mockContext.mockImplementation(() => pendingContext)
-    const { wrapper } = harness()
+    const { client, wrapper } = harness()
     const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
 
@@ -350,6 +374,46 @@ describe('useRunHistory', () => {
       JSON.stringify({ seq: 50, ts: '2026-07-30T00:00:00.000Z', type: 'note', message: 'full-replay' }),
     )
     await waitFor(() => expect(result.current.visibleEvents.map(({ seq }) => seq)).toEqual([50, 100, 101]))
+    client.setQueryData(['run-history-context', 'default', 'run-1'], context())
+    await waitFor(() => expect(result.current.fallback).toBe(true))
+    vi.unstubAllGlobals()
+  })
+
+  it('compares compaction with the newest cursorless page, not an older page high-water mark', async () => {
+    FakeEventSource.instances = []
+    vi.stubGlobal('EventSource', FakeEventSource)
+    let resolveStale!: (value: RunHistoryPage) => void
+    const stale = new Promise<RunHistoryPage>((resolve) => {
+      resolveStale = resolve
+    })
+    mockHistory
+      .mockResolvedValueOnce(page(100))
+      .mockImplementationOnce(() => stale)
+    mockContext.mockResolvedValue(context())
+    const { client, wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+
+    act(() => {
+      for (let seq = 101; seq <= 300; seq += 1) {
+        FakeEventSource.instances[0]!.emit(
+          'run-event',
+          JSON.stringify({ seq, ts: '2026-07-30T00:00:00.000Z', type: 'note', message: `event-${seq}` }),
+        )
+      }
+    })
+    await waitFor(() => expect(mockHistory).toHaveBeenCalledTimes(2))
+
+    client.setQueryData(['run-history', 'default', 'run-1'], {
+      pages: [page(100, { newerCursor: 'newer', asOfSeq: 500 }), page(200)],
+      pageParams: ['older', undefined],
+    })
+    resolveStale(page(250))
+    await waitFor(() => expect(
+      client.getQueryData<{ pages: RunHistoryPage[] }>(['run-history', 'default', 'run-1'])?.pages.at(-1)?.asOfSeq,
+    ).toBe(250))
+    expect(client.getQueryData<{ pages: RunHistoryPage[] }>(['run-history', 'default', 'run-1'])?.pages[0]?.asOfSeq).toBe(500)
+    expect(result.current.visibleEvents.some(({ seq }) => seq === 250)).toBe(true)
     vi.unstubAllGlobals()
   })
 
