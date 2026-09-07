@@ -66,6 +66,8 @@ export interface SessionTranscriptProps {
   /** Main-document integration preserves the shell's existing dock-owned jump pill. */
   scrollControls?: ThreadScrollControls
   renderMode?: 'flat' | 'virtual'
+  /** Reuse rows already derived by the main view; panel callers can omit this. */
+  rowModels?: readonly TranscriptRowModel[]
 }
 
 /** The main run record plus reduced turns, without rendering or backend inspection. */
@@ -149,8 +151,12 @@ export function SessionTranscript({
   messageActions,
   scrollControls,
   renderMode,
+  rowModels: providedRowModels,
 }: SessionTranscriptProps) {
-  const rowModels = useMemo(() => buildTranscriptRows(sections, runId), [sections, runId])
+  const rowModels = useMemo(
+    () => providedRowModels ?? buildTranscriptRows(sections, runId),
+    [providedRowModels, sections, runId],
+  )
   const internalScroll = useThreadScroll(`${runId}:${viewId}`, { surface: mode })
   const controls = scrollControls ?? internalScroll
   const rows = useMemo<ThreadRow[]>(

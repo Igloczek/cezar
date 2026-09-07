@@ -494,17 +494,7 @@ const RunRow = React.memo(function RunRow({
       ) : null}
     </div>
   )
-}, (previous, next) =>
-  previous.run === next.run &&
-  previous.queuePosition === next.queuePosition &&
-  previous.currentRunId === next.currentRunId &&
-  previous.now === next.now &&
-  previous.scope === next.scope &&
-  previous.variant === next.variant &&
-  previous.showTokens === next.showTokens &&
-  previous.showCost === next.showCost &&
-  previous.onTogglePin === next.onTogglePin,
-)
+})
 
 /** A variant row's subtitle: what differs between A and B — the backend and what it has spent.
  *  `runner` is absent on records predating the choice; those are Claude by definition. */
@@ -526,8 +516,6 @@ function variantLabel(run: RunRecord, showTokens: boolean, showCost: boolean): s
 export function TaskQuickListContainer() {
   const runs = useRuns()
   const pinMutation = usePinRun()
-  const pinMutationRef = React.useRef(pinMutation)
-  pinMutationRef.current = pinMutation
   const health = useHealth()
   const visibility = usageMetricVisibility(health.data)
   const [view, setView] = useListView()
@@ -537,11 +525,11 @@ export function TaskQuickListContainer() {
   const now = useNow(30_000)
   const onTogglePin = React.useCallback(
     (run: RunRecord, pinned: boolean) =>
-      pinMutationRef.current.mutate(
+      pinMutation.mutate(
         { id: run.id, pinned },
         { onError: (error: Error) => toast(error.message, { tone: 'danger' }) },
       ),
-    [],
+    [pinMutation.mutate],
   )
   // The sidebar's chips are the same chips as the tables', so they get their status the same way:
   // one batched request for the whole list, mounted here where the list is.

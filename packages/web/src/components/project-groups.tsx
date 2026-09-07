@@ -189,15 +189,13 @@ function ProjectGroup({
   // THIS project, and the cache invalidated is the one `useProjectRuns` above writes — which is
   // `'default'` for the boot project, whose list mounts unscoped.
   const pinMutation = usePinRun(project.id, boot ? 'default' : project.id)
-  const pinMutationRef = React.useRef(pinMutation)
-  pinMutationRef.current = pinMutation
   const onTogglePin = React.useCallback(
     (run: RunRecord, pinned: boolean) =>
-      pinMutationRef.current.mutate(
+      pinMutation.mutate(
         { id: run.id, pinned },
         { onError: (error: Error) => toast(error.message, { tone: 'danger' }) },
       ),
-    [],
+    [pinMutation.mutate],
   )
 
   const waiting = runs.data ? listCounts(runs.data).waiting : 0

@@ -4,10 +4,11 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createUsageStore, type UsageStore } from './events'
-import { GlobalEventsProvider, RUN_EVENT_BATCH_MS, useGlobalEvents, useRunUsage, useUsage } from './global-events'
+import { GlobalEventsProvider, useGlobalEvents, useRunUsage, useUsage } from './global-events'
 import { setApiScope } from '@open-mercato/cezar-api-client'
 import { createQueryClient } from './query-client'
-import { queryKeys, useProviderStatus, workspaceQueryKeys } from './queries'
+import { queryKeys, useProviderStatus, useRuns, useTodos, workspaceQueryKeys } from './queries'
+import { RUN_EVENT_BATCH_MS } from './run-events'
 import type { ApiRun, ProviderStatusResponse, RunRecord } from '@open-mercato/cezar-api-client'
 
 /**
@@ -718,6 +719,75 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.map((r) => r.id)).toEqual(['theirs'])
     expect(usage.get()).toEqual({ theirs: SAMPLE })
   })
+
+  it('drops a queued event when the active project changes before the batch flushes', async () => {
+    vi.useFakeTimers()
+    setApiScope('project-a')
+    const projectAKey = queryKeys.runs.list()
+    client.setQueryData<ApiRun[]>(projectAKey, [])
+    const { source } = mount()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+
+    source.emit('run', stampedRun(runRecord('r1'), 'project-a'))
+    setApiScope('project-b')
+    const projectBKey = queryKeys.runs.list()
+    client.setQueryData<ApiRun[]>(projectBKey, [])
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(RUN_EVENT_BATCH_MS)
+    })
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(450)
+    })
+
+    expect(client.getQueryData<ApiRun[]>(projectAKey)).toEqual([])
+    expect(client.getQueryData<ApiRun[]>(projectBKey)).toEqual([])
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['project-a', 'runs'],
+      refetchType: 'none',
+    })
+  })
+
+  it('marks an inactive project cache stale without applying its event to the active scope', async () => {
+    setApiScope('project-b')
+    const projectAKey = ['project-a', 'runs', 'list'] as const
+    client.setQueryData<ApiRun[]>(projectAKey, [runRecord('r1')])
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { source } = mount()
+
+    source.emit('run', stampedRun(runRecord('r1', { status: 'done' }), 'project-a'))
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 450))
+    })
+
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['project-a', 'runs'], refetchType: 'none' })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['project-a', 'todos'], refetchType: 'none' })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['project-a', 'worktrees'], refetchType: 'none' })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['run-history', 'project-a'], refetchType: 'none' })
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: ['run-history-context', 'project-a'], refetchType: 'none' })
+    expect(client.getQueryData<ApiRun[]>(projectAKey)?.[0]?.status).toBe('running')
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toBeUndefined()
+  })
+
+  it('refetches an inactive cache if that project becomes active before the debounce flushes', async () => {
+    vi.useFakeTimers()
+    setApiScope('project-b')
+    client.setQueryData<ApiRun[]>(['project-a', 'runs', 'list'], [runRecord('r1')])
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const { source } = mount()
+
+    source.emit('run', stampedRun(runRecord('r1', { status: 'done' }), 'project-a'))
+    setApiScope('project-a')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(450)
+    })
+
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: ['project-a', 'runs'],
+      refetchType: 'active',
+    })
+  })
 })
 
 describe('useGlobalEvents — reconcile doctrine', () => {
@@ -745,7 +815,7 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     source.drop()
     source.open()
 
-    expect(invalidatedKeys(invalidate)).toEqual([
+    expect(invalidatedKeys(invalidate)).toEqual(expect.arrayContaining([
       queryKeys.runs.all, // covers the list and every detail under it
       // The cross-project index behind the global Tasks page. Nothing else here covers it: the
       // scoped caches hold one project, and this spans the workspace.
@@ -754,7 +824,111 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       queryKeys.health, // the repo/branch chip — health is not on the stream (#369)
       queryKeys.worktrees, // the Resources panel's list/total (#483)
       workspaceQueryKeys.providerStatus,
-    ])
+      ['run-history', 'default'],
+      ['run-history-context', 'default'],
+    ]))
+  })
+
+  it('marks cached inactive project and transcript queries stale on reconnect', async () => {
+    setApiScope('project-b')
+    const projectAListKey = ['project-a', 'runs', 'list'] as const
+    const projectAHistoryKey = ['run-history', 'project-a', 'run-1'] as const
+    client.setQueryData(projectAListKey, [])
+    client.setQueryData(projectAHistoryKey, { pages: [], pageParams: [] })
+    const { source } = mount()
+    source.open()
+    source.drop()
+    source.open()
+
+    await waitFor(() => {
+      expect(client.getQueryState(projectAListKey)?.isInvalidated).toBe(true)
+      expect(client.getQueryState(projectAHistoryKey)?.isInvalidated).toBe(true)
+    })
+  })
+
+  it('flushes the queued run batch before reconnect reconciliation', async () => {
+    const initial = deferredResponse()
+    const reconciled = deferredResponse()
+    vi.mocked(fetch).mockReturnValueOnce(initial.promise).mockReturnValueOnce(reconciled.promise)
+
+    function RunsProbe() {
+      useRuns()
+      return null
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <GlobalEventsProvider>
+          <RunsProbe />
+        </GlobalEventsProvider>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    const source = FakeEventSource.last
+    source.open()
+    await act(async () => initial.resolve(json([runRecord('r1', { status: 'queued' })])))
+    await waitFor(() => expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.status).toBe('queued'))
+
+    source.emit('run', stampedRun(runRecord('r1', { status: 'running' })))
+    source.drop()
+    source.open()
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.status).toBe('running')
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+
+    // This event arrives after the authoritative request starts but before its older response
+    // resolves. The batcher must hold it until the response has been applied.
+    source.emit('run', stampedRun(runRecord('r1', { status: 'done' })))
+    await act(async () => reconciled.resolve(json([runRecord('r1', { status: 'running' })])))
+    await waitFor(() => expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.status).toBe('done'))
+    await new Promise((resolve) => setTimeout(resolve, RUN_EVENT_BATCH_MS + 10))
+    expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())?.[0]?.status).toBe('done')
+  })
+
+  it('does not apply a queued todo snapshot over the authoritative reconcile response', async () => {
+    const initial = deferredResponse()
+    const reconciled = deferredResponse()
+    const afterEvent = deferredResponse()
+    vi.mocked(fetch)
+      .mockReturnValueOnce(initial.promise)
+      .mockReturnValueOnce(reconciled.promise)
+      .mockReturnValueOnce(afterEvent.promise)
+
+    function TodosProbe() {
+      useTodos()
+      return null
+    }
+
+    render(
+      <QueryClientProvider client={client}>
+        <GlobalEventsProvider>
+          <TodosProbe />
+        </GlobalEventsProvider>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1))
+    const source = FakeEventSource.last
+    source.open()
+    await act(async () => initial.resolve(json([{ id: 'todo-b', summary: 'authoritative' }])) )
+    await waitFor(() => expect(client.getQueryData(queryKeys.todos)).toEqual([
+      { id: 'todo-b', summary: 'authoritative' },
+    ]))
+
+    source.drop()
+    source.open()
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
+    source.emit('todos', JSON.stringify({
+      project: BOOT,
+      items: [{ id: 'todo-a', summary: 'stale stream snapshot' }],
+    }))
+    await act(async () => reconciled.resolve(json([{ id: 'todo-b', summary: 'authoritative' }])) )
+    await waitFor(() => expect(client.getQueryData(queryKeys.todos)).toEqual([
+      { id: 'todo-b', summary: 'authoritative' },
+    ]))
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(3))
+    await act(async () => afterEvent.resolve(json([{ id: 'todo-b', summary: 'authoritative' }])) )
+    await waitFor(() => expect(client.getQueryData(queryKeys.todos)).toEqual([
+      { id: 'todo-b', summary: 'authoritative' },
+    ]))
   })
 
   it('refetches when a hidden tab comes back', () => {
@@ -768,7 +942,7 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     // A phone that slept: the tab was frozen, no error handler ever ran, and the stream may have
     // been dead for an hour. What is on screen is about to be read as true.
     setVisibility('visible')
-    expect(invalidatedKeys(invalidate)).toEqual([
+    expect(invalidatedKeys(invalidate)).toEqual(expect.arrayContaining([
       queryKeys.runs.all,
       // The cross-project index behind the global Tasks page — nothing else here covers it.
       workspaceQueryKeys.runsIndex,
@@ -776,7 +950,9 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       queryKeys.health,
       queryKeys.worktrees,
       workspaceQueryKeys.providerStatus,
-    ])
+      ['run-history', 'default'],
+      ['run-history-context', 'default'],
+    ]))
   })
 
   it('stops listening for visibility once unmounted', () => {

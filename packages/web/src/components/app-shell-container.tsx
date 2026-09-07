@@ -41,11 +41,6 @@ export function skillsUpdateMarkerOf(state: SkillsUpdateState | undefined): bool
   return state?.available === true && (state.status === 'available' || state.status === 'error')
 }
 
-function ToolsMenuContainer() {
-  const health = useHealth()
-  return <ToolsMenu health={health.data} />
-}
-
 /**
  * The app shell, wired to live data.
  *
@@ -145,7 +140,7 @@ export const AppShellContainer = memo(function AppShellContainer({ children }: {
       skillsUpdateAvailable,
     ],
   )
-  const toolsMenu = useMemo(() => <ToolsMenuContainer />, [])
+  const toolsMenu = useMemo(() => <ToolsMenu health={health.data} />, [health.data])
 
   return (
     // The Active/Archived filter is shared by the quick-list below and the Tasks table (Step 3.4),

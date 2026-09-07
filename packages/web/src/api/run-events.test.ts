@@ -271,6 +271,116 @@ describe('useRunEvents — seq dedup uses `>`', () => {
 
     expect(result.current).toHaveLength(1)
   })
+
+  it('accepts an unseen late frame after history advances its file high-water mark', async () => {
+    const { result, rerender } = renderHook(
+      ({ afterSeq }: { afterSeq: number }) => useRunEvents('run-1', { afterSeq }),
+      { initialProps: { afterSeq: 100 } },
+    )
+    const source = FakeEventSource.last
+
+    source.emit('run-event', line(101, 'stdout', { text: 'first' }))
+    source.emit('run-event', line(200, 'stdout', { text: 'second' }))
+    await flushEvents()
+
+    // A compaction page may now say 300 even though an ephemeral frame from the old socket is
+    // still in flight. It is newer than the original page and must not be dropped as replay.
+    rerender({ afterSeq: 300 })
+    source.emit('ui-event', line(150, 'item.delta', {
+      itemId: 'm1', field: 'text', delta: 'late-live',
+    }))
+    await flushEvents()
+
+    expect(result.current.map(({ seq }) => seq)).toEqual([101, 200, 150])
+  })
+})
+
+describe('useRunEvents — compaction handoff', () => {
+  it('labels a coalesced delta with its newest sequence', async () => {
+    const { result } = renderHook(() => useRunEvents('run-1', {
+      maxEvents: 10,
+      compactAt: 100,
+    }))
+    const source = FakeEventSource.last
+
+    source.emit('ui-event', line(1, 'item.delta', {
+      itemId: 'm1', field: 'text', delta: 'a',
+    }))
+    source.emit('ui-event', line(3, 'item.delta', {
+      itemId: 'm1', field: 'text', delta: 'b',
+    }))
+    await flushEvents()
+
+    expect(result.current).toHaveLength(1)
+    expect(result.current[0]).toMatchObject({ seq: 3, delta: 'ab' })
+  })
+
+  it('keeps coalesced deltas ordered around unrelated events', async () => {
+    const { result } = renderHook(() => useRunEvents('run-1', { compactAt: 100 }))
+    const source = FakeEventSource.last
+
+    source.emit('ui-event', line(1, 'item.delta', {
+      itemId: 'm1', field: 'text', delta: 'a',
+    }))
+    source.emit('run-event', line(2, 'stdout', { text: 'tool output' }))
+    source.emit('ui-event', line(3, 'item.delta', {
+      itemId: 'm1', field: 'text', delta: 'b',
+    }))
+    await flushEvents()
+
+    expect(result.current.map(({ seq }) => seq)).toEqual([2, 3])
+    expect(result.current[1]).toMatchObject({ type: 'item.delta', delta: 'ab' })
+  })
+
+  it('does not evict live events while compaction is still pending', async () => {
+    let resolveCompaction!: (coveredSeqs: readonly number[] | false) => void
+    const compaction = new Promise<readonly number[] | false>((resolve) => {
+      resolveCompaction = resolve
+    })
+    const { result } = renderHook(() => useRunEvents('run-1', {
+      maxEvents: 2,
+      compactAt: 1,
+      onCompact: () => compaction,
+    }))
+    const source = FakeEventSource.last
+
+    source.emit('run-event', line(1, 'stdout', { text: 'a' }))
+    source.emit('run-event', line(2, 'stdout', { text: 'b' }))
+    source.emit('run-event', line(3, 'stdout', { text: 'c' }))
+    await flushEvents()
+
+    // A snapshot that has not answered cannot repair any ephemeral prefix it would evict.
+    expect(result.current.map(({ seq }) => seq)).toEqual([1, 2, 3])
+    resolveCompaction([1])
+    await vi.waitFor(() => expect(result.current.map(({ seq }) => seq)).toEqual([2, 3]))
+  })
+
+  it('keeps more than the target when compaction has no durable coverage', async () => {
+    const onCompact = vi.fn(async () => [])
+    const { result } = renderHook(() => useRunEvents('run-1', {
+      maxEvents: 2,
+      compactAt: 1,
+      onCompact,
+    }))
+    const source = FakeEventSource.last
+
+    act(() => {
+      for (let seq = 1; seq <= 5_001; seq += 1) {
+        source.emit('ui-event', line(seq, 'item.delta', {
+          itemId: 'message-1',
+          field: 'text',
+          delta: 'x',
+        }))
+      }
+    })
+    await flushEvents()
+    await vi.waitFor(() => expect(onCompact).toHaveBeenCalled())
+
+    // A numeric high-water cap would silently delete live-only deltas. An empty coverage result
+    // is a successful snapshot with nothing safe to evict, so the chunks collapse losslessly.
+    expect(result.current).toHaveLength(1)
+    expect(result.current[0]?.delta).toHaveLength(5_001)
+  })
 })
 
 describe('useRunEvents — lifecycle', () => {

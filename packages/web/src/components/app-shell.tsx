@@ -186,6 +186,7 @@ export const AppShell = React.memo(function AppShell({
   const activeTo = activeNavPath(areaPathname)
   const current = activeNavItem(areaPathname)
   const [menuOpen, setMenuOpen] = React.useState(false)
+  const closeMenu = React.useCallback(() => setMenuOpen(false), [])
   const mainRef = React.useRef<HTMLElement>(null)
   const routeOwnsArrival = routeOwnsScrollArrival(pathname)
   // The desktop column's width (#788). Read once, lazily, from `localStorage` — it is a
@@ -266,7 +267,7 @@ export const AppShell = React.memo(function AppShell({
           <MobileTopBar title={current?.label ?? 'cezar'} />
           {/* The drawer keeps its fixed 264px: it is a full-height overlay on a phone, where
               there is no second column to trade width with and no pointer to drag a border. */}
-          <MobileNavDrawer {...nav} onNavigate={() => setMenuOpen(false)} />
+          <MobileNavDrawer {...nav} onNavigate={closeMenu} />
         </Sheet>
 
         {banner ? (
