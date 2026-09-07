@@ -140,6 +140,24 @@ describe('useRunHistory', () => {
     expect(result.current.hasOlder).toBe(false)
   })
 
+  it('keeps the optimized stream after an older-page failure so the retry remains available', async () => {
+    mockHistory.mockImplementation(async (_id, cursor) => {
+      if (cursor === 'older-100') throw new Error('older page unavailable')
+      return page(100, { olderCursor: 'older-100', hasOlder: true })
+    })
+    mockContext.mockResolvedValue(context())
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+    await waitFor(() => expect(result.current.hasOlder).toBe(true))
+
+    await act(async () => {
+      await result.current.loadOlder().catch(() => undefined)
+    })
+    await waitFor(() => expect(result.current.isFetchingOlder).toBe(false))
+    expect(result.current.fallback).toBe(false)
+    expect(result.current.hasOlder).toBe(true)
+  })
+
   it('jump-to-latest clears retained older pages and refetches the cursorless tail', async () => {
     mockHistory.mockImplementation(async (_id, cursor) =>
       cursor === 'older-100'
@@ -156,6 +174,35 @@ describe('useRunHistory', () => {
     await act(() => result.current.jumpToLatest())
     await waitFor(() => expect(result.current.retainedPages).toBe(1))
     expect(mockHistory).toHaveBeenLastCalledWith('run-1', undefined, expect.any(Object))
+  })
+
+  it('jumps to the latest tail without waiting for a hung older-page request', async () => {
+    let resolveOlder!: (value: RunHistoryPage) => void
+    const older = new Promise<RunHistoryPage>((resolve) => {
+      resolveOlder = resolve
+    })
+    mockHistory.mockImplementation(async (_id, cursor) => {
+      if (cursor === 'older-100') return older
+      return page(100, { olderCursor: 'older-100', hasOlder: true })
+    })
+    mockContext.mockResolvedValue(context())
+    const { wrapper } = harness()
+    const { result } = renderHook(() => useRunHistory('run-1'), { wrapper })
+    await waitFor(() => expect(result.current.hasOlder).toBe(true))
+
+    let loadingOlder!: Promise<void>
+    act(() => {
+      loadingOlder = result.current.loadOlder().catch(() => undefined)
+    })
+    await waitFor(() => expect(mockHistory).toHaveBeenCalledTimes(2))
+
+    await act(async () => result.current.jumpToLatest())
+    await waitFor(() => expect(result.current.retainedPages).toBe(1))
+    expect(mockHistory).toHaveBeenCalledTimes(3)
+
+    resolveOlder(page(1))
+    await act(async () => loadingOlder)
+    expect(result.current.visibleEvents.map(({ seq }) => seq)).toEqual([100])
   })
 
   it('keeps the newest tail when maxPages evicts it during older-page browsing', async () => {
@@ -192,6 +239,42 @@ describe('useRunHistory', () => {
     first.unmount()
     renderHook(() => useRunHistory('run-1'), { wrapper })
     expect(FakeEventSource.instances.at(-1)?.url).toBe('/api/v1/runs/run-1/events?cursor=live-100&afterSeq=100')
+  })
+
+  it('does not let an older task request patch the current task cache', async () => {
+    let resolveOlder!: (value: RunHistoryPage) => void
+    const older = new Promise<RunHistoryPage>((resolve) => {
+      resolveOlder = resolve
+    })
+    mockHistory.mockImplementation(async (id, cursor) => {
+      if (id === 'run-a' && cursor === 'older-a') return older
+      if (id === 'run-a') return page(100, { olderCursor: 'older-a', hasOlder: true })
+      return page(200)
+    })
+    mockContext.mockResolvedValue(context())
+    const { client, wrapper } = harness()
+    const { result, rerender } = renderHook(({ runId }: { runId: string }) => useRunHistory(runId), {
+      initialProps: { runId: 'run-a' },
+      wrapper,
+    })
+    await waitFor(() => expect(result.current.hasOlder).toBe(true))
+
+    let loadingOlder!: Promise<void>
+    act(() => {
+      loadingOlder = result.current.loadOlder()
+    })
+    await waitFor(() => expect(mockHistory).toHaveBeenCalledTimes(2))
+    rerender({ runId: 'run-b' })
+    await waitFor(() => expect(result.current.visibleEvents.map(({ seq }) => seq)).toEqual([200]))
+
+    resolveOlder(page(1))
+    await act(async () => loadingOlder)
+    const runAEvents = client.getQueryData<{ pages: RunHistoryPage[] }>(['run-history', 'default', 'run-a'])?.pages
+      .flatMap(({ events }) => events.map(({ seq }) => seq)) ?? []
+    expect(runAEvents).toContain(100)
+    expect(runAEvents).not.toContain(200)
+    expect(client.getQueryData<{ pages: RunHistoryPage[] }>(['run-history', 'default', 'run-b'])?.pages
+      .flatMap(({ events }) => events.map(({ seq }) => seq))).toEqual([200])
   })
 
   it('refreshes the tail while older-page loading is still pending', async () => {

@@ -152,6 +152,7 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
   const initialPageHighWaterRef = useRef(0)
   const allowLateFramesRef = useRef(false)
   const seenSeqsRef = useRef(new Set<number>())
+  const compactCommittedRef = useRef<((events: readonly RunEvent[]) => void) | undefined>(undefined)
 
   useEffect(() => {
     const { afterSeq = 0 } = optionsRef.current
@@ -203,7 +204,12 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
     }
 
     const requestCompaction = (snapshot: readonly RunEvent[]): void => {
-      if (optionsRef.current.onCompact === undefined) return
+      const options = optionsRef.current
+      if (options.onCompact === undefined) return
+      if (
+        (options.compactAt === undefined || eventsSinceCompaction < options.compactAt)
+        && (options.maxEvents === undefined || snapshot.length <= options.maxEvents)
+      ) return
       if (Date.now() < nextCompactionAt) return
       compactionRequested = true
       const requestedAt = eventsSinceCompaction
@@ -230,16 +236,7 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
             // numeric high-water mark is not enough: ephemeral deltas burn sequence numbers.
             const covered = new Set(coveredSeqs)
             if (covered.size === 0) return
-            setEvents((current) => {
-              const next = current.filter(({ seq }) => !covered.has(seq))
-              // The server will resume after the compacted page's durable high-water mark.
-              // Drop dedup state for the same compacted prefix so it cannot grow with a long
-              // run; keep the still-live tail (and queued frames not flushed yet).
-              const nextSeen = new Set<number>()
-              for (const { seq } of [...next, ...pending]) rememberSeq(nextSeen, seq)
-              seenSeqsRef.current = nextSeen
-              return next
-            })
+            setEvents((current) => current.filter(({ seq }) => !covered.has(seq)))
           },
           () => {
             if (!disposed) markCompactionFailed()
@@ -254,26 +251,9 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
       pending = []
       setEvents((current) => {
         const options = optionsRef.current
-        const next = options.compactAt !== undefined || options.onCompact !== undefined
+        return options.compactAt !== undefined || options.onCompact !== undefined
           ? coalesceLiveDeltas([...current, ...batch])
           : [...current, ...batch]
-        if (
-          !compactionRequested &&
-          options.compactAt !== undefined &&
-          eventsSinceCompaction >= options.compactAt
-        ) {
-          requestCompaction(next)
-        }
-        // `maxEvents` is a compaction target, never a lossy cap. A hung or failed snapshot cannot
-        // repair an evicted prefix because ephemeral frames are not replayed.
-        if (
-          !compactionRequested &&
-          options.maxEvents !== undefined &&
-          next.length > options.maxEvents
-        ) {
-          requestCompaction(next)
-        }
-        return next
       })
     }
 
@@ -401,6 +381,7 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
     document.addEventListener('visibilitychange', onVisibilityChange)
     window.addEventListener('pagehide', onPageHide)
     window.addEventListener('pageshow', onPageShow)
+    compactCommittedRef.current = requestCompaction
     open()
 
     return () => {
@@ -413,9 +394,15 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
       document.removeEventListener('visibilitychange', onVisibilityChange)
       window.removeEventListener('pagehide', onPageHide)
       window.removeEventListener('pageshow', onPageShow)
+      if (compactCommittedRef.current === requestCompaction) compactCommittedRef.current = undefined
       closeSource()
     }
   }, [runId, scope])
+
+  useEffect(() => {
+    if (events.length === 0) return
+    compactCommittedRef.current?.(events)
+  }, [events])
 
   // History compaction advances the persisted high-water mark without changing the run owner.
   // Keep the live buffer intact: persisted `asOfSeq` can move past ephemeral frames that are not

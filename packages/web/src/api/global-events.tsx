@@ -199,6 +199,7 @@ function createInactiveProjectRefresher(queryClient: QueryClient): {
   let scopes = new Set<string>()
   return {
     onEvent(project) {
+      if (pending !== undefined && scopes.has(project)) return
       for (const scope of projectCacheScopes(queryClient, project)) scopes.add(scope)
       if (pending !== undefined) return
       pending = setTimeout(() => {

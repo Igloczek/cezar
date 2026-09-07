@@ -10,6 +10,7 @@ const MAX_HISTORY_PAGES = 5
 const COMPACT_LIVE_AT_EVENTS = 200
 const MAX_LIVE_EVENTS = 5_000
 const COMPACTION_TIMEOUT_MS = 15_000
+const EMPTY_RUN_EVENTS: RunEvent[] = []
 
 function orderedUnique(...groups: readonly (readonly RunEvent[])[]): RunEvent[] {
   const bySeq = new Map<number, RunEvent>()
@@ -158,6 +159,12 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     retry: 1,
   })
 
+  const initialHistoryError = history.isError
+    && history.data === undefined
+    && !history.isFetchPreviousPageError
+    && !history.isFetchNextPageError
+    && !history.isRefetchError
+  const initialContextError = context.isError && context.data === undefined && !context.isRefetchError
   const pages = history.data?.pages ?? []
   const newestPageRef = useRef<RunHistoryPage | undefined>(undefined)
   const ownerKey = `${scope}\0${runId ?? ''}`
@@ -170,7 +177,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     historyGenerationRef.current += 1
     newestPageRef.current = undefined
   }
-  if (history.isError || context.isError) ownerRef.current.fallbackLatched = true
+  if (initialHistoryError || initialContextError) ownerRef.current.fallbackLatched = true
   const fallback = ownerRef.current.fallbackLatched
   const enqueueHistoryMutation = useCallback(<T,>(mutation: () => Promise<T>): Promise<T> => {
     const previous = historyMutationRef.current
@@ -281,7 +288,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
     fallbackTailRef.current = { runId, scope, events: [] }
   }
   if (!fallback) fallbackTailRef.current.events = liveEvents
-  const fallbackTail = fallback ? fallbackTailRef.current.events : []
+  const fallbackTail = fallback ? fallbackTailRef.current.events : EMPTY_RUN_EVENTS
 
   const pagedEvents = useMemo(
     () => {
@@ -314,12 +321,15 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
   }, [context.data, fallback, liveEvents, visibleEvents])
 
   const loadOlder = useCallback(async () => {
+    const requestOwnerKey = ownerKey
+    const requestGeneration = historyGenerationRef.current
     const current = queryClient.getQueryData<InfiniteData<RunHistoryPage, string | undefined>>(historyKey)
     const tail = newestCursorlessPage(current?.pages ?? [])
     if (tail) queryClient.setQueryData(tailKey, tail)
     try {
       await enqueueHistoryMutation(() => history.fetchPreviousPage())
     } finally {
+      if (ownerRef.current.key !== requestOwnerKey || historyGenerationRef.current !== requestGeneration) return
       const latestTail = newestPageRef.current
       if (!latestTail) return
       queryClient.setQueryData<InfiniteData<RunHistoryPage, string | undefined> | undefined>(historyKey, (current) => {
@@ -336,12 +346,13 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
 
   const jumpToLatest = useCallback(async () => {
     historyGenerationRef.current += 1
-    await enqueueHistoryMutation(async () => {
-      newestPageRef.current = undefined
-      queryClient.removeQueries({ queryKey: tailKey, exact: true })
-      await queryClient.resetQueries({ queryKey: historyKey, exact: true })
-    })
-  }, [enqueueHistoryMutation, historyKey, queryClient, tailKey])
+    historyMutationRef.current = Promise.resolve()
+    newestPageRef.current = undefined
+    queryClient.removeQueries({ queryKey: tailKey, exact: true })
+    // resetQueries cancels the in-flight older-page request, clears its data immediately, and
+    // refetches the active cursorless page. Do not await the refetch: the scroller must jump now.
+    void queryClient.resetQueries({ queryKey: historyKey, exact: true })
+  }, [historyKey, queryClient, tailKey])
 
   return {
     visibleEvents,
