@@ -134,8 +134,8 @@ export function parseRunEvent(data: string): RunEvent | null {
 export interface RunEventStreamOptions {
   cursor?: string
   afterSeq?: number
-  /** Optimized history keeps a bounded live tail; full-replay fallback leaves this absent. */
-  maxEvents?: number
+  /** Request another compaction when the live snapshot exceeds this size; never truncates it. */
+  compactWhenOver?: number
   /** Ask the history owner to fold the live prefix into a fresh persisted tail page. */
   compactAt?: number
   /** Return exactly the live sequence numbers now covered by durable history. */
@@ -208,7 +208,7 @@ export function useRunEvents(runId: string | undefined, options: RunEventStreamO
       if (options.onCompact === undefined) return
       if (
         (options.compactAt === undefined || eventsSinceCompaction < options.compactAt)
-        && (options.maxEvents === undefined || snapshot.length <= options.maxEvents)
+        && (options.compactWhenOver === undefined || snapshot.length <= options.compactWhenOver)
       ) return
       if (Date.now() < nextCompactionAt) return
       compactionRequested = true

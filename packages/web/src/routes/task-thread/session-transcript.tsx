@@ -414,21 +414,25 @@ function sameThreadEntry(previous: ThreadEntry | undefined, next: ThreadEntry): 
   }
 }
 
+/** A new UiToolItem field must be added here before it can be ignored by memoization. */
+const TOOL_ITEM_COMPARE_FIELDS = {
+  kind: true,
+  id: true,
+  name: true,
+  toolKind: true,
+  title: true,
+  status: true,
+  input: true,
+  output: true,
+  error: true,
+  diffs: true,
+  locations: true,
+  exitCode: true,
+  parentItemId: true,
+} satisfies Record<keyof UiToolItem, true>
+
+const TOOL_ITEM_COMPARE_KEYS = Object.keys(TOOL_ITEM_COMPARE_FIELDS) as Array<keyof UiToolItem>
+
 function sameToolItem(previous: UiToolItem, next: UiToolItem): boolean {
-  return (
-    previous.kind === 'tool' &&
-    next.kind === 'tool' &&
-    previous.id === next.id &&
-    previous.name === next.name &&
-    previous.toolKind === next.toolKind &&
-    previous.title === next.title &&
-    previous.status === next.status &&
-    previous.input === next.input &&
-    previous.output === next.output &&
-    previous.error === next.error &&
-    previous.diffs === next.diffs &&
-    previous.locations === next.locations &&
-    previous.exitCode === next.exitCode &&
-    previous.parentItemId === next.parentItemId
-  )
+  return TOOL_ITEM_COMPARE_KEYS.every((key) => previous[key] === next[key])
 }

@@ -8,7 +8,7 @@ import { liveItemKey, useRunEvents, type RunEventCompaction } from './run-events
 
 const MAX_HISTORY_PAGES = 5
 const COMPACT_LIVE_AT_EVENTS = 200
-const MAX_LIVE_EVENTS = 5_000
+const LIVE_COMPACTION_SIZE_TRIGGER = 5_000
 const COMPACTION_TIMEOUT_MS = 15_000
 const EMPTY_RUN_EVENTS: RunEvent[] = []
 
@@ -274,7 +274,7 @@ export function useRunHistory(runId: string | undefined): RunHistoryState {
   const liveEvents = useRunEvents(newestPage && !fallback ? runId : undefined, newestPage ? {
     cursor: newestPage.liveCursor,
     afterSeq: newestPage.asOfSeq,
-    maxEvents: MAX_LIVE_EVENTS,
+    compactWhenOver: LIVE_COMPACTION_SIZE_TRIGGER,
     compactAt: COMPACT_LIVE_AT_EVENTS,
     onCompact: compactLive,
   } : {})

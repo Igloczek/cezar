@@ -298,7 +298,7 @@ describe('useRunEvents — seq dedup uses `>`', () => {
 describe('useRunEvents — compaction handoff', () => {
   it('labels a coalesced delta with its newest sequence', async () => {
     const { result } = renderHook(() => useRunEvents('run-1', {
-      maxEvents: 10,
+      compactWhenOver: 10,
       compactAt: 100,
     }))
     const source = FakeEventSource.last
@@ -338,7 +338,7 @@ describe('useRunEvents — compaction handoff', () => {
       resolveCompaction = resolve
     })
     const { result } = renderHook(() => useRunEvents('run-1', {
-      maxEvents: 2,
+      compactWhenOver: 2,
       compactAt: 1,
       onCompact: () => compaction,
     }))
@@ -355,10 +355,10 @@ describe('useRunEvents — compaction handoff', () => {
     await vi.waitFor(() => expect(result.current.map(({ seq }) => seq)).toEqual([2, 3]))
   })
 
-  it('keeps more than the target when compaction has no durable coverage', async () => {
+  it('does not truncate live events when compaction has no durable coverage', async () => {
     const onCompact = vi.fn(async () => [])
     const { result } = renderHook(() => useRunEvents('run-1', {
-      maxEvents: 2,
+      compactWhenOver: 2,
       compactAt: 1,
       onCompact,
     }))
