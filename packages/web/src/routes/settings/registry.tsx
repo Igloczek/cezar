@@ -25,7 +25,7 @@ import { NotificationsSection } from './notifications-section'
 import { ProjectsSection } from './projects-section'
 import { PromptTemplatesSection } from './prompt-templates-section'
 import { ResourcesSection } from './resources-section'
-import { SkillsSection } from './skills-section'
+import { GlobalSkillsManagement } from './global-skills-management'
 import { WorktreesSection } from './worktrees-section'
 
 /**
@@ -159,9 +159,9 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   {
     id: 'skills',
     title: 'Skills',
-    description: 'Updates for skills installed on this machine.',
+    description: 'Choose active skills for this workspace and manage installed skill updates.',
     icon: PackageCheckIcon,
-    component: SkillsSection,
+    component: GlobalSkillsManagement,
     scope: 'global',
   },
   {
