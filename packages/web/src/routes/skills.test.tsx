@@ -162,10 +162,15 @@ describe('the catalog list', () => {
     expect(rows[2]?.querySelector('[data-slot="skill-source"]')?.textContent).toBe('global')
   })
 
-  it('the first skill is the default selection: detail shows markdown body, path, used-by', async () => {
-    serve()
+  it('opens management by default and reads a skill only after explicit selection', async () => {
+    serve({ importable: [{ name: 'pr-create', description: 'Create a pull request' }] })
     renderAt('/skills')
 
+    await waitFor(() => expect(document.querySelector('[data-slot="skills-import-panel"]')).not.toBeNull())
+    await waitFor(() => expect(rowNames()).toHaveLength(3))
+    expect(detail()).toBeNull()
+
+    fireEvent.click(document.querySelector('[data-slot="skill-row"][data-skill="om-fix"]')!)
     await waitFor(() => expect(detail()).not.toBeNull())
     const pane = detail()!
     expect(pane.querySelector('h2')?.textContent).toBe('om-fix')
@@ -175,6 +180,18 @@ describe('the catalog list', () => {
       expect(pane.querySelector('[data-slot="skill-body"] h1')?.textContent).toBe('om-fix'),
     )
     expect(pane.querySelector('[data-slot="skill-used-by"]')?.textContent).toContain('fix-and-verify › Fix')
+  })
+
+  it('offers a mobile path from default management to the catalog and back to details', async () => {
+    serve({ importable: [{ name: 'pr-create' }] })
+    renderAt('/skills')
+    await waitFor(() => expect(document.querySelector('[data-slot="skills-import-panel"]')).not.toBeNull())
+    await waitFor(() => expect(rowNames()).toHaveLength(3))
+
+    fireEvent.click(document.querySelector('[data-slot="skills-back"]')!)
+    await waitFor(() => expect(document.querySelector('[data-slot="skills-detail"]')?.className).toContain('hidden'))
+    fireEvent.click(document.querySelector('[data-slot="skill-row"][data-skill="om-review"]')!)
+    await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('om-review'))
   })
 
   it('clicking a row selects it via the URL and swaps the detail', async () => {
@@ -211,7 +228,7 @@ describe('the catalog list', () => {
           .at(-1)?.body,
       ).toMatchObject({ importedSkills: [] }),
     )
-    expect(detail()?.querySelector('h2')?.textContent).toBe('om-fix')
+    expect(detail()).toBeNull()
 
     fireEvent.click(document.querySelector('[data-slot="skill-row"][data-skill="team-review"]')!)
     await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('team-review'))
@@ -280,13 +297,17 @@ describe('refresh (#384: selection and scroll survive)', () => {
     expect(detail()?.querySelector('h2')?.textContent).toBe('om-review')
   })
 
-  it('a refresh that drops the selected skill falls back to the first skill, never crashes', async () => {
-    serve({ refreshed: SKILLS.filter((s) => s.name !== 'om-review') })
+  it('a refresh that drops the selected skill falls back to management, never crashes', async () => {
+    serve({
+      refreshed: SKILLS.filter((s) => s.name !== 'om-review'),
+      importable: [{ name: 'pr-create' }],
+    })
     renderAt('/skills?skill=om-review')
     await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('om-review'))
 
     fireEvent.click(document.querySelector('[data-slot="skills-refresh"]')!)
-    await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('om-fix'))
+    await waitFor(() => expect(document.querySelector('[data-slot="skills-import-panel"]')).not.toBeNull())
+    expect(detail()).toBeNull()
   })
 })
 

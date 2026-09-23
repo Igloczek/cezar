@@ -21,12 +21,11 @@ import { BookmarkletPanel } from './settings/bookmarklets-section'
 
 /**
  * `/skills` — the skills catalog as its own top-level surface (was `/settings/skills`, moved
- * out of the Settings shell so it stops carrying the settings sub-nav): catalog + detail +
- * Refresh + the bookmarklet panel. `/settings/skills` now redirects here (routes.tsx) so pasted
- * links keep working. Skills are playbooks agents follow, not a knob — so this is a page, not a
- * settings section.
+ * out of the Settings shell so it stops carrying the settings sub-nav): management by default,
+ * with readable skill detail on demand. `/settings/skills` redirects here (routes.tsx), so that
+ * legacy entry lands on the management view too.
  *
- * The two standing feedback items stay built in:
+ * The standing feedback items stay built in:
  *  - #377 project-first and bold: the list renders through `orderSkills`/`filterSkills`, the
  *    same pure module every picker uses;
  *  - #384 stable scroll/selection: selection lives in the URL (`?skill=<name>`), the rows are
@@ -40,6 +39,7 @@ import { BookmarkletPanel } from './settings/bookmarklets-section'
 
 const BOOKMARKLETS = '__bm'
 const IMPORT = '__import'
+const CATALOG = '__catalog'
 
 export function SkillsRoute() {
   return (
@@ -92,16 +92,18 @@ function SkillsCatalog() {
   // a repo with its own configured `skillsRepos` gates nothing, so the endpoint answers empty.
   const canImport = (importableQuery.data?.length ?? 0) > 0
   const param = searchParams.get('skill')
-  // Explicit choice if it still exists, else the first skill, else the bookmarklet panel —
-  // the legacy fallback rule. A vanished selection degrades, it never crashes. The two pinned
-  // panels (import, bookmarklets) are sentinels, not catalog names.
+  // Management is the default surface. A skill detail opens only for an explicit skill URL/row
+  // selection; a vanished selection degrades back to management rather than a read-only detail.
+  // Pinned panels and the mobile catalog surface are sentinels, not catalog names.
+  const defaultSelection = canImport || importableQuery.isPending ? IMPORT : BOOKMARKLETS
   const selection =
-    param === BOOKMARKLETS || param === IMPORT
+    param === BOOKMARKLETS || param === IMPORT || param === CATALOG
       ? param
       : param !== null && skills.some((skill) => skill.name === param)
         ? param
-        : (skills[0]?.name ?? (canImport ? IMPORT : BOOKMARKLETS))
-  const selected = skills.find((skill) => skill.name === selection) ?? null
+        : defaultSelection
+  const detailSelection = selection === CATALOG ? defaultSelection : selection
+  const selected = skills.find((skill) => skill.name === detailSelection) ?? null
   const shown = filterSkills(skills, query)
 
   return (
@@ -115,7 +117,7 @@ function SkillsCatalog() {
           // Pin the pane below the sticky h-14 header so the ROWS scroll inside it (the #384
           // stable-scroll surface) — `var(--spacing)*14` tracks the density token.
           'md:sticky md:top-14 md:max-h-[calc(100dvh-(var(--spacing)*14))]',
-          param === null ? 'flex' : 'hidden md:flex',
+          selection === CATALOG ? 'flex' : 'hidden md:flex',
         )}
       >
         <div className="flex shrink-0 items-center gap-2 p-3 pb-2">
@@ -213,22 +215,28 @@ function SkillsCatalog() {
         </div>
       </section>
 
-      {/* Detail pane. Hidden below md until the URL carries a selection. */}
+      {/* Management/detail pane is the default; the catalog has an explicit mobile URL. */}
       <section
         data-slot="skills-detail"
-        className={cn('min-w-0 flex-1 flex-col', param === null ? 'hidden md:flex' : 'flex')}
+        className={cn('min-w-0 flex-1 flex-col', selection === CATALOG ? 'hidden md:flex' : 'flex')}
       >
         <div className="min-w-0 flex-1 px-4 py-4 md:px-7 md:py-5">
           <Link
-            to="/skills"
+            to={`/skills?skill=${CATALOG}`}
             data-slot="skills-back"
             className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden"
           >
             <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
-            Back to the list
+            Browse skills
           </Link>
 
-          {selection === IMPORT ? (
+          {selection === CATALOG ? (
+            defaultSelection === IMPORT ? (
+              <ImportSkillsPanel projectId={updateProjectId} />
+            ) : (
+              <BookmarkletPanel skills={skills} />
+            )
+          ) : selection === IMPORT ? (
             <ImportSkillsPanel projectId={updateProjectId} />
           ) : selection === BOOKMARKLETS ? (
             <BookmarkletPanel skills={skills} />
