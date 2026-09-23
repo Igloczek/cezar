@@ -252,9 +252,13 @@ describe('the catalog list', () => {
     expect(document.querySelector('[data-slot="bookmarklets-row"]')).not.toBeNull()
   })
 
-  it('an empty catalog explains where skills come from, and the panel is the fallback surface', async () => {
+  it('an empty catalog keeps management as default and explains where skills come from', async () => {
     serve({ skills: [] })
     renderAt('/skills')
+
+    await waitFor(() => expect(document.querySelector('[data-slot="skills-import-panel"]')).not.toBeNull())
+    expect(detail()).toBeNull()
+    fireEvent.click(document.querySelector('[data-slot="skills-back"]')!)
 
     // #374: the hint must mention every project discovery dir, not just `.ai/skills/`.
     await waitFor(() => {
@@ -263,8 +267,6 @@ describe('the catalog list', () => {
       expect(text).toContain('.ai/cezar/skills/')
       expect(text).toContain('.agents/skills/')
     })
-    // No skills → the bookmarklet panel is the default detail (legacy fallback rule).
-    await waitFor(() => expect(document.querySelector('[data-slot="bookmarklet-panel"]')).not.toBeNull())
   })
 })
 

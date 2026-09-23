@@ -88,14 +88,14 @@ function SkillsCatalog() {
   }
 
   const skills = orderSkills(skillsQuery.data ?? [])
-  // Only offer the import surface when a default (vendor) repo actually has skills to import —
+  // Only pin a separate import entry when the default (vendor) repo has skills to import —
   // a repo with its own configured `skillsRepos` gates nothing, so the endpoint answers empty.
   const canImport = (importableQuery.data?.length ?? 0) > 0
   const param = searchParams.get('skill')
   // Management is the default surface. A skill detail opens only for an explicit skill URL/row
   // selection; a vanished selection degrades back to management rather than a read-only detail.
   // Pinned panels and the mobile catalog surface are sentinels, not catalog names.
-  const defaultSelection = canImport || importableQuery.isPending ? IMPORT : BOOKMARKLETS
+  const defaultSelection = IMPORT
   const selection =
     param === BOOKMARKLETS || param === IMPORT || param === CATALOG
       ? param
