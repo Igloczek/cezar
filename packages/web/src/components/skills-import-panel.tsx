@@ -252,6 +252,41 @@ export function ImportSkillsPanel({ projectId }: { projectId: string }) {
   )
 }
 
+/** Compact catalog toggle for an Open Mercato skill. The panel remains available in global
+ * settings; the project Skills catalog uses this same persisted selection inline. */
+export function ImportedSkillToggle({ name }: { name: string }) {
+  const queryClient = useQueryClient()
+  const uiState = useWorkspaceUiState()
+  const importable = useImportableSkills()
+  const enabled = effectiveImported(uiState.data, (importable.data ?? []).map((skill) => skill.name)).includes(name)
+
+  return (
+    <input
+      type="checkbox"
+      data-slot="skill-activation"
+      aria-label={`${enabled ? 'Disable' : 'Enable'} ${name}`}
+      checked={enabled}
+      disabled={uiState.isPending}
+      onClick={(event) => event.stopPropagation()}
+      onChange={async () => {
+        const current = queryClient.getQueryData<WorkspaceUiState>(workspaceQueryKeys.uiState)
+        const names = (importable.data ?? []).map((skill) => skill.name)
+        const previous = effectiveImported(current, names)
+        const next = previous.includes(name) ? previous.filter((entry) => entry !== name) : [...previous, name]
+        queryClient.setQueryData(workspaceQueryKeys.uiState, { ...current, importedSkills: next })
+        try {
+          queryClient.setQueryData(workspaceQueryKeys.uiState, await putWorkspaceUiState({ importedSkills: next }))
+          void queryClient.invalidateQueries({ queryKey: queryKeys.skills })
+        } catch (error) {
+          toast(error instanceof Error ? error.message : String(error), { tone: 'danger' })
+          void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.uiState })
+        }
+      }}
+      className="size-3.5 shrink-0"
+    />
+  )
+}
+
 function scopeLabel(scope: SkillsUpdateState['scopes'][number]['scope']) {
   return scope === 'project' ? 'Project installation' : 'Global installation'
 }

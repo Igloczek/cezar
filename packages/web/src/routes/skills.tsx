@@ -10,7 +10,7 @@ import { queryKeys, useImportableSkills, useProjects, useSkills, useWorkflows } 
 import { useProjectScope } from '@/api/project-scope-context'
 import type { Skill } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
-import { ImportSkillsPanel } from '@/components/skills-import-panel'
+import { ImportSkillsPanel, ImportedSkillToggle } from '@/components/skills-import-panel'
 import { SkillDetailBody, SkillSourceTag } from '@/components/skill-detail'
 import { SkillEmptyHint } from '@/components/skill-empty-hint'
 import { Input } from '@/components/ui/input'
@@ -143,11 +143,22 @@ function SkillsCatalog() {
           </button>
         </div>
 
+        <p className="px-3 pb-2 text-[11px] leading-relaxed text-soft-foreground">
+          Open Mercato skills can be enabled here. Other skill sources have no activation setting in cezar.
+        </p>
+
         <ul data-slot="skill-rows" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
           {skillsQuery.isPending ? (
             <li className="px-2.5 py-2 text-[13px] text-soft-foreground">Loading…</li>
           ) : shown.length > 0 ? (
-            shown.map((skill) => <SkillRow key={skill.path} skill={skill} active={selection === skill.name} />)
+            shown.map((skill) => (
+              <SkillRow
+                key={skill.path}
+                skill={skill}
+                active={selection === skill.name}
+                canToggle={skill.source === 'team' && (importableQuery.data ?? []).some((item) => item.name === skill.name)}
+              />
+            ))
           ) : (
             <li className="px-2.5 py-2 text-xs leading-relaxed text-soft-foreground">
               {skills.length > 0 ? '(no skills match)' : <SkillEmptyHint />}
@@ -241,10 +252,10 @@ function SkillsCatalog() {
   )
 }
 
-function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
+function SkillRow({ skill, active, canToggle }: { skill: Skill; active: boolean; canToggle: boolean }) {
   const project = isProjectSkill(skill)
   return (
-    <li>
+    <li className="flex items-start gap-2">
       <Link
         to={`/skills?skill=${encodeURIComponent(skill.name)}`}
         data-slot="skill-row"
@@ -252,7 +263,7 @@ function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
         data-project={project ? 'true' : undefined}
         aria-current={active ? 'page' : undefined}
         className={cn(
-          'flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
+          'flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
           active && 'bg-muted',
         )}
       >
@@ -276,6 +287,11 @@ function SkillRow({ skill, active }: { skill: Skill; active: boolean }) {
           <span className="line-clamp-2 pl-[22px] text-xs text-soft-foreground">{skill.description}</span>
         ) : null}
       </Link>
+      {canToggle ? (
+        <span className="mt-2.5 shrink-0" onClick={(event) => event.stopPropagation()}>
+          <ImportedSkillToggle name={skill.name} />
+        </span>
+      ) : null}
     </li>
   )
 }

@@ -195,6 +195,34 @@ describe('the catalog list', () => {
     )
   })
 
+  it('puts team-skill activation in the catalog row without making the name toggle', async () => {
+    const teamSkill = skill({ name: 'team-review', source: 'team' })
+    serve({ skills: [...SKILLS, teamSkill], importable: [{ name: 'team-review' }] })
+    renderAt('/skills')
+    await waitFor(() => expect(document.querySelector('[data-slot="skill-activation"]')).not.toBeNull())
+
+    const toggle = document.querySelector<HTMLInputElement>('[data-slot="skill-activation"]')!
+    expect(toggle.checked).toBe(true) // uncurated team catalog defaults to enabled
+    fireEvent.click(toggle)
+    await waitFor(() =>
+      expect(
+        requests
+          .filter((request) => request.method === 'PUT' && request.url === '/api/v1/workspace/ui-state')
+          .at(-1)?.body,
+      ).toMatchObject({ importedSkills: [] }),
+    )
+    expect(detail()?.querySelector('h2')?.textContent).toBe('om-fix')
+
+    fireEvent.click(document.querySelector('[data-slot="skill-row"][data-skill="team-review"]')!)
+    await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('team-review'))
+    expect(
+      document.querySelector<HTMLInputElement>('[data-slot="skill-activation"]')?.checked,
+    ).toBe(false)
+    expect(document.querySelector('[data-slot="skills-list"]')?.textContent).toContain(
+      'Other skill sources have no activation setting in cezar.',
+    )
+  })
+
   it('the filter narrows the rows but never hides the pinned bookmarklet entry', async () => {
     serve()
     renderAt('/skills')
