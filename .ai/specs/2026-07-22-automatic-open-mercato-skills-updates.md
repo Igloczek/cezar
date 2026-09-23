@@ -1,4 +1,12 @@
-# Automatic Open Mercato skills updates
+# Skills updates (supersedes the original Open Mercato-only design below)
+
+The implementation covers every entry in the standard skills CLI project/global lockfiles, independent of source. Project inventory reads `<repo>/skills-lock.json`; global inventory reads `~/.agents/.skill-lock.json`. A status check is local JSON parsing only. Although the CLI docs describe `skills check`, upstream issue [#954](https://github.com/vercel-labs/skills/issues/954) reports that it reinstalled outdated skills; cezar therefore never invokes it and reports inventory, not update availability.
+
+When automatic updates are enabled, after listen cezar runs `npx --yes skills update -p -y` and/or `npx --yes skills update -g -y` for scopes with lock entries. Manual update uses the same explicit scoped commands. The upstream docs document `skills update [skills...]`, `-p`, `-g`, and `-y` ([CLI reference](https://skills.sh/docs/cli), [repository](https://github.com/vercel-labs/skills)). Scope-only commands intentionally let the CLI select every installed skill in that scope, from any supported source/version.
+
+The existing six-hour status cache, 30-second command timeout, 64 KiB output cap, in-process serialization, `~/.cache/cez/skills-update.lock` cross-process lock, output redaction, `CEZ_DRY_RUN`, default-on preference, and fail-soft startup behavior remain. CLI resolution, lockfile parsing, network/auth, or timeout failures produce normalized status; per-scope command failures preserve partial success. No raw stderr or environment values enter state. The preference label is **Update skills automatically**. UI status names project/global installed-skill counts; it does not claim remote update availability.
+
+The original design history follows.
 
 ## TLDR
 

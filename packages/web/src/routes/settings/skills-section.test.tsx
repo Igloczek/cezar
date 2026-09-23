@@ -53,7 +53,7 @@ function serve(
         skills: [],
         checkedAt: null,
         updatedAt: null,
-        reason: 'Open Mercato installation is not tracked',
+        reason: 'no skills CLI installations found',
       },
       {
         scope: 'global',
@@ -62,7 +62,7 @@ function serve(
         skills: [],
         checkedAt: null,
         updatedAt: null,
-        reason: 'Open Mercato installation is not tracked',
+        reason: 'no skills CLI installations found',
       },
     ],
     ...updateOverrides,
@@ -117,16 +117,17 @@ afterEach(() => {
 const puts = () => requests.filter((request) => request.method === 'PUT')
 
 describe('Global settings → Skills', () => {
-  it('renders the inherited default and quiet no-installation state', async () => {
+  it('renders the inherited default and read-only inventory status', async () => {
     serve()
     renderSkills()
     const toggle = await screen.findByRole('switch', {
-      name: 'Update Open Mercato skills automatically',
+      name: 'Update skills automatically',
     })
     expect(toggle.getAttribute('aria-checked')).toBe('true')
     expect(screen.getByText('On (default)')).toBeTruthy()
     expect(screen.getByText(/CEZ_SKILLS_AUTO_UPDATE supplies/)).toBeTruthy()
-    expect(await screen.findByText('No tracked Open Mercato installation found.')).toBeTruthy()
+    expect(await screen.findByText('No skills CLI installations found.')).toBeTruthy()
+    expect(screen.getByText(/Availability checks are not read-only/)).toBeTruthy()
     expect((screen.getByRole('button', { name: 'Use default' }) as HTMLButtonElement).disabled).toBe(true)
   })
 
@@ -134,7 +135,7 @@ describe('Global settings → Skills', () => {
     serve()
     renderSkills()
     const toggle = await screen.findByRole('switch', {
-      name: 'Update Open Mercato skills automatically',
+      name: 'Update skills automatically',
     })
     fireEvent.click(toggle)
     await waitFor(() => expect(puts().at(-1)?.body).toEqual({ skillsAutoUpdate: false }))

@@ -51,21 +51,7 @@ export class SkillsUpdateConflictError extends Error {
 }
 
 type LockRead = { kind: 'ok'; names: string[] } | { kind: 'missing' } | { kind: 'invalid' };
-type LockEntry = { source?: unknown; sourceUrl?: unknown };
-
-/** Accept only GitHub's canonical host and the documented owner/repo shorthand. */
-export function isOpenMercatoSkillsSource(value: unknown): boolean {
-  if (typeof value !== 'string') return false;
-  const source = value.trim().replace(/\/$/, '');
-  if (/^open-mercato\/skills(?:\.git)?$/i.test(source)) return true;
-  try {
-    const url = new URL(source);
-    return url.protocol === 'https:' && url.hostname.toLowerCase() === 'github.com'
-      && /^\/open-mercato\/skills(?:\.git)?$/i.test(url.pathname);
-  } catch {
-    return false;
-  }
-}
+type LockEntry = { source?: unknown; sourceUrl?: unknown; sourceType?: unknown };
 
 async function readLock(path: string): Promise<LockRead> {
   let parsed: unknown;
@@ -83,7 +69,7 @@ async function readLock(path: string): Promise<LockRead> {
   const names = Object.entries(root.skills as Record<string, unknown>).flatMap(([name, raw]) => {
     if (!name || !raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
     const entry = raw as LockEntry;
-    return isOpenMercatoSkillsSource(entry.source) || isOpenMercatoSkillsSource(entry.sourceUrl) ? [name] : [];
+    return [name];
   });
   return { kind: 'ok', names: [...new Set(names)].sort() };
 }
@@ -113,13 +99,6 @@ async function defaultRun(file: string, args: readonly string[], cwd: string, ti
     env: { ...process.env, npm_config_yes: 'true', GIT_TERMINAL_PROMPT: '0' },
   });
   return { stdout: result.stdout, stderr: result.stderr };
-}
-
-/** Parse only explicit update lines naming a lock-authorized skill. */
-function availableNames(output: string, names: readonly string[]): string[] {
-  const lines = output.split(/\r?\n/);
-  return names.filter((name) => lines.some((line) =>
-    line.toLowerCase().includes(name.toLowerCase()) && /update|out.of.date|new version/i.test(line)));
 }
 
 export class SkillsUpdateService {
@@ -196,8 +175,6 @@ export class SkillsUpdateService {
     let release: (() => Promise<void>) | undefined;
     try {
       release = await this.acquireLock(lockPath, rejectIfBusy);
-      const npx = await this.resolveNpx();
-      if (!npx) throw Object.assign(new Error('missing executable'), { code: 'ENOENT' });
       const pairs: Array<[SkillsUpdateScope, string]> = [
         ['project', join(repoRoot, 'skills-lock.json')],
         ['global', join(this.home, '.agents', '.skill-lock.json')],
@@ -208,7 +185,7 @@ export class SkillsUpdateService {
           && this.now() - Date.parse(this.globalScopeCache.checkedAt) < CHECK_TTL_MS) {
           scopes.push(this.globalScopeCache);
         } else {
-          const result = await this.checkScope(scope, path, repoRoot, npx);
+          const result = await this.checkScope(scope, path);
           if (scope === 'global') this.globalScopeCache = result;
           scopes.push(result);
         }
@@ -238,9 +215,10 @@ export class SkillsUpdateService {
       this.states.set(repoRoot, state);
       return state;
     }
-    let current = this.states.get(repoRoot);
-    if (!current?.checkedAt) current = await this.performCheck(repoRoot, false, rejectIfBusy);
-    if (!current.available) return current;
+    // Refresh the local inventory before a manual or automatic mutation so a
+    // cached lockfile cannot narrow or widen the scopes that will be updated.
+    const current = await this.performCheck(repoRoot, true, rejectIfBusy);
+    if (!current.scopes.some((scope) => scope.skills.length > 0)) return current;
 
     const lockPath = join(this.home, '.cache', 'cez', 'skills-update.lock');
     let release: (() => Promise<void>) | undefined;
@@ -252,16 +230,12 @@ export class SkillsUpdateService {
       if (!npx) throw Object.assign(new Error('missing executable'), { code: 'ENOENT' });
       for (const scope of ['project', 'global'] as const) {
         const prior = current.scopes.find((entry) => entry.scope === scope) ?? blankScope(scope);
-        if (!prior.available || prior.skills.length === 0) { outcomes.push(prior); continue; }
-        const path = scope === 'project' ? join(repoRoot, 'skills-lock.json') : join(this.home, '.agents', '.skill-lock.json');
-        const owned = await readLock(path);
-        const names = owned.kind === 'ok' ? prior.skills.filter((name) => owned.names.includes(name)).sort() : [];
-        if (names.length === 0) {
-          outcomes.push({ ...prior, status: 'unavailable', reason: 'installation metadata is unsupported' });
-          continue;
-        }
+        if (prior.skills.length === 0) { outcomes.push(prior); continue; }
         try {
-          await this.runCommand(npx, ['--yes', 'skills', 'update', ...names, scope === 'project' ? '-p' : '-g', '-y'], repoRoot, this.timeoutMs);
+          const path = scope === 'project' ? join(repoRoot, 'skills-lock.json') : join(this.home, '.agents', '.skill-lock.json');
+          const owned = await readLock(path);
+          if (owned.kind !== 'ok' || owned.names.length === 0) { outcomes.push({ ...prior, status: 'unavailable', reason: 'no supported installed skills found' }); continue; }
+          await this.runCommand(npx, ['--yes', 'skills', 'update', scope === 'project' ? '-p' : '-g', '-y'], repoRoot, this.timeoutMs);
           completed.add(scope);
           outcomes.push({ ...prior, status: 'current', available: false, skills: [], updatedAt: new Date(this.now()).toISOString(), reason: undefined });
         } catch (error) {
@@ -273,7 +247,8 @@ export class SkillsUpdateService {
       const reason = reasonFor(error);
       for (const scope of ['project', 'global'] as const) {
         const prior = current.scopes.find((entry) => entry.scope === scope) ?? blankScope(scope);
-        outcomes.push({ ...prior, status: prior.available ? 'error' : prior.status, reason: prior.available ? reason : prior.reason });
+        const affected = prior.skills.length > 0;
+        outcomes.push({ ...prior, status: affected ? 'error' : prior.status, reason: affected ? reason : prior.reason });
       }
     } finally {
       await release?.();
@@ -294,20 +269,13 @@ export class SkillsUpdateService {
     return final;
   }
 
-  private async checkScope(scope: SkillsUpdateScope, path: string, cwd: string, npx: string): Promise<SkillsUpdateScopeState> {
+  private async checkScope(scope: SkillsUpdateScope, path: string): Promise<SkillsUpdateScopeState> {
     const checkedAt = new Date(this.now()).toISOString();
     const lock = await readLock(path);
-    if (lock.kind === 'missing') return { ...blankScope(scope), status: 'current', checkedAt, reason: 'installation is not tracked' };
+    if (lock.kind === 'missing') return { ...blankScope(scope), status: 'current', checkedAt, reason: 'no skills CLI installation found' };
     if (lock.kind === 'invalid') return { ...blankScope(scope), status: 'unavailable', checkedAt, reason: 'installation metadata is unsupported' };
-    if (lock.names.length === 0) return { ...blankScope(scope), status: 'current', checkedAt, reason: 'Open Mercato installation is not tracked' };
-    try {
-      const args = ['--yes', 'skills', 'check', ...lock.names, ...(scope === 'project' ? ['-p'] : ['-g'])];
-      const result = await this.runCommand(npx, args, cwd, this.timeoutMs);
-      const skills = availableNames(`${result.stdout}\n${result.stderr}`, lock.names);
-      return { ...blankScope(scope), status: skills.length ? 'available' : 'current', available: skills.length > 0, skills, checkedAt };
-    } catch (error) {
-      return { ...blankScope(scope), status: 'error', checkedAt, reason: reasonFor(error) };
-    }
+    if (lock.names.length === 0) return { ...blankScope(scope), status: 'current', checkedAt, reason: 'no skills CLI installations found' };
+    return { ...blankScope(scope), status: 'current', available: false, skills: lock.names, checkedAt };
   }
 
   private async acquireLock(path: string, rejectIfBusy = false): Promise<() => Promise<void>> {
@@ -367,7 +335,7 @@ export class SkillsUpdateCoordinator {
     this.tail = this.tail.then(async () => {
       if (this.stopped || this.roots.get(id) !== root) return;
       const state = await this.service.check(root);
-      if (state.available && await this.autoUpdateEnabled()) await this.service.update(root);
+      if (state.scopes.some((scope) => scope.skills.length > 0) && await this.autoUpdateEnabled()) await this.service.update(root);
     }).catch(() => undefined);
   }
 

@@ -54,13 +54,13 @@ function SkillsForm({
   const inherited = config.skillsAutoUpdate === null
   const status = (() => {
     if (updateError) return 'Installation status is unavailable right now.'
-    if (!update) return 'Checking tracked Open Mercato installations…'
+    if (!update) return 'Reading installed skills…'
     if (update.status === 'unavailable')
       return update.scopes.find((scope) => scope.reason)?.reason ?? 'Automatic skill updates are unavailable.'
-    if (update.scopes.every((scope) => scope.skills.length === 0))
-      return 'No tracked Open Mercato installation found.'
-    const count = new Set(update.scopes.flatMap((scope) => scope.skills)).size
-    return `${count} tracked Open Mercato skill${count === 1 ? '' : 's'} found.`
+    if (update.scopes.every((scope) => scope.skills.length === 0)) return 'No skills CLI installations found.'
+    return update.scopes.filter((scope) => scope.skills.length > 0).map((scope) =>
+      `${scope.scope === 'project' ? 'Project' : 'Global'}: ${scope.skills.length} installed skill${scope.skills.length === 1 ? '' : 's'}`
+    ).join(' · ')
   })()
 
   return (
@@ -72,11 +72,11 @@ function SkillsForm({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-sm font-semibold text-foreground">
-              <label htmlFor="skills-auto-update">Update Open Mercato skills automatically</label>
+              <label htmlFor="skills-auto-update">Update skills automatically</label>
             </h2>
             <p className="text-[13px] text-muted-foreground">
-              Checks installed Open Mercato skills in the background and applies available updates. Other
-              skills and untracked folders are never changed.
+              Checks the project and global skills CLI lockfiles, then updates installed skills in those scopes.
+              Availability checks are not read-only in the upstream CLI, so cezar reports installed scopes instead.
             </p>
           </div>
           <div className="flex shrink-0 flex-col items-end gap-1">
