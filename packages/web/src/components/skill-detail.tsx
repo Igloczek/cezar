@@ -8,6 +8,7 @@ import { repoChipOf } from '@/components/app-shell-container'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { bookmarkletUrl } from '@/lib/bookmarklet'
 import { isProjectSkill } from '@/lib/skills'
 import { useActiveProjectId } from '@/lib/project-router'
@@ -56,18 +57,27 @@ export function SkillSourceTag({
       ? `Shared from ${teamRepo}, a team skills repository configured for this project.`
       : SKILL_SOURCE_DESCRIPTIONS[source]
   return (
-    <span
-      data-slot="skill-source"
-      data-source={source}
-      title={description}
-      className={cn(
-        'shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px]',
-        project ? 'font-semibold text-foreground' : 'text-soft-foreground',
-        className,
-      )}
-    >
-      {source}
-    </span>
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            data-slot="skill-source"
+            data-source={source}
+            aria-label={description}
+            className={cn(
+              'shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px]',
+              project ? 'font-semibold text-foreground' : 'text-soft-foreground',
+              className,
+            )}
+          >
+            {source}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="top" sideOffset={6} className="max-w-[260px]">
+          {description}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 

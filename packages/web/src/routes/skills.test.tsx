@@ -211,9 +211,12 @@ describe('the catalog list and skill preview', () => {
     expect(detail()?.querySelector('[data-slot="skill-status"]')).toBeNull()
     const detailToggle = detail()?.querySelector<HTMLElement>('[data-slot="skill-activation-detail"]')
     expect(detailToggle?.getAttribute('data-state')).toBe('unchecked')
-    expect(detail()?.querySelector('[data-slot="skill-source"]')?.getAttribute('title')).toContain(
-      'Shared from open-mercato/skills',
-    )
+    const sourceTag = detail()?.querySelector<HTMLElement>('[data-slot="skill-source"]')
+    expect(sourceTag?.getAttribute('title')).toBeNull()
+    fireEvent.pointerEnter(sourceTag!, { pointerType: 'mouse' })
+    expect(
+      await screen.findByText('Shared from open-mercato/skills, a team skills repository configured for this project.'),
+    ).toBeTruthy()
     expect(detail()?.querySelector('[data-slot="skill-body"]')?.textContent).toContain('Body of team-review.')
     expect(detail()?.querySelector('[data-slot="skill-run-from-github"]')).toBeNull()
     fireEvent.click(detailToggle!)
