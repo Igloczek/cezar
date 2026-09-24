@@ -117,7 +117,7 @@ afterEach(() => {
   document.documentElement.classList.remove('light')
 })
 
-const PROJECT_SECTIONS = ['agents', 'agent-config', 'worktrees', 'prompt-templates']
+const PROJECT_SECTIONS = ['agents', 'agent-config', 'worktrees', 'bookmarklets', 'prompt-templates']
 const GLOBAL_SECTIONS = [
   'appearance',
   'notifications',
@@ -222,6 +222,9 @@ describe('the settings shell', () => {
     const ids = [...index.querySelectorAll('[data-section]')].map((el) => el.getAttribute('data-section'))
     expect(ids).toEqual(PROJECT_SECTIONS)
     // Scope-aware links (step 3.2): the flat `to` picks up the active project's prefix.
+    expect(index.querySelector('[data-section="bookmarklets"]')?.getAttribute('href')).toBe(
+      '/p/boot/settings/bookmarklets',
+    )
     // …and the cross-link out of the project area is NOT prefixed.
     expect(document.querySelector('[data-slot="settings-global-link"]')?.getAttribute('href')).toBe(
       '/settings/global',

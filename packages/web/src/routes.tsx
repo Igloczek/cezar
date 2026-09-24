@@ -92,7 +92,8 @@ const AutomationsRoute = lazy(() =>
 )
 
 /** `/settings/skills` moved to the top-level `/skills` (out of the Settings shell). Redirect —
- *  preserving the `?skill=` selection and any hash — so pasted links still land. The scoped
+ *  preserving the `?skill=` selection and any hash — so pasted links and saved bookmarklets
+ *  still land. The scoped
  *  Navigate keeps the redirect inside the active project. */
 function SettingsSkillsRedirect() {
   const location = useLocation()
