@@ -259,6 +259,7 @@ function SkillRow({
   onToggle: (name: string) => void
 }) {
   const project = isProjectSkill(skill)
+  const alwaysEnabled = skill.source === 'ai' || skill.source === 'cezar' || skill.source === 'agents'
   const rowClassName = cn(
     'flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
     active && 'bg-muted',
@@ -282,12 +283,12 @@ function SkillRow({
   )
   return (
     <li className="flex items-start gap-2">
-      {canToggle ? (
+      {canToggle || alwaysEnabled ? (
         <Switch
           data-slot="skill-activation"
-          aria-label={`${skill.enabled ? 'Disable' : 'Enable'} ${skill.name}`}
-          checked={skill.enabled}
-          disabled={toggleDisabled}
+          aria-label={alwaysEnabled ? `${skill.name} is always enabled` : `${skill.enabled ? 'Disable' : 'Enable'} ${skill.name}`}
+          checked={alwaysEnabled || skill.enabled}
+          disabled={alwaysEnabled || toggleDisabled}
           onCheckedChange={() => onToggle(skill.name)}
           size="sm"
           className="mt-2 shrink-0"
