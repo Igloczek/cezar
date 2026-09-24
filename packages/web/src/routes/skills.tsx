@@ -18,6 +18,7 @@ import {
 import type { Skill, WorkspaceUiState } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { SkillDetailBody, SkillSourceTag } from '@/components/skill-detail'
+import type { SkillActivation } from '@/components/skill-detail'
 import { SkillEmptyHint } from '@/components/skill-empty-hint'
 import { SkillsUpdateCard } from '@/components/skills-update-card'
 import { Input } from '@/components/ui/input'
@@ -33,6 +34,26 @@ function effectiveImported(uiState: WorkspaceUiState | undefined, allNames: read
   return Array.isArray(value)
     ? value.filter((name): name is string => typeof name === 'string' && !!name)
     : [...allNames]
+}
+
+function skillActivation(
+  skill: SkillCatalogItem,
+  importableNames: ReadonlySet<string>,
+  pending: boolean,
+  onToggle: (name: string) => void,
+): SkillActivation | undefined {
+  const alwaysEnabled = skill.source === 'ai' || skill.source === 'cezar' || skill.source === 'agents'
+  const canToggle = skill.source === 'team' && importableNames.has(skill.name)
+  if (!alwaysEnabled && !canToggle) return undefined
+
+  return {
+    ariaLabel: alwaysEnabled
+      ? `${skill.name} is always enabled`
+      : `${skill.enabled ? 'Disable' : 'Enable'} ${skill.name}`,
+    checked: alwaysEnabled || skill.enabled,
+    disabled: alwaysEnabled || pending,
+    onCheckedChange: () => onToggle(skill.name),
+  }
 }
 
 /**
@@ -138,6 +159,16 @@ function SkillsCatalog() {
   const param = searchParams.get('skill')
   const selected = catalog.find((skill) => skill.name === param) ?? (param === null ? catalog.find((skill) => skill.enabled) : null) ?? null
   const selection = selected?.name ?? null
+  const selectedActivation = selected
+    ? skillActivation(selected, importableNames, workspaceUiState.isPending, toggleImportedSkill)
+    : undefined
+  const hasTrackedUpdateSkills = updateQuery.data?.scopes.some((scope) => scope.skills.length > 0) ?? false
+  const showSkillsUpdate = Boolean(projectId) && (
+    updateQuery.isError ||
+    updateQuery.data?.status !== 'current' ||
+    hasTrackedUpdateSkills ||
+    updateQuery.data?.needsUpgradeNotes === true
+  )
   const shown = filterSkills(catalog, query)
 
   return (
@@ -178,7 +209,7 @@ function SkillsCatalog() {
             Refresh
           </button>
         </div>
-        {projectId ? (
+        {showSkillsUpdate ? (
           <div className="shrink-0 px-3 pb-2">
             <SkillsUpdateCard projectId={projectId} state={updateQuery.data} loadError={updateQuery.error} />
           </div>
@@ -193,9 +224,7 @@ function SkillsCatalog() {
                 key={skill.name}
                 skill={skill}
                 active={selection === skill.name}
-                canToggle={skill.source === 'team' && importableNames.has(skill.name)}
-                toggleDisabled={workspaceUiState.isPending}
-                onToggle={toggleImportedSkill}
+                activation={skillActivation(skill, importableNames, workspaceUiState.isPending, toggleImportedSkill)}
               />
             ))
           ) : (
@@ -227,6 +256,7 @@ function SkillsCatalog() {
               <SkillDetailBody
                 skill={selected}
                 enabled={selected.enabled}
+                activation={selectedActivation}
                 usedBy={skillUsedBy(workflowsQuery.data?.workflows ?? [], selected.name)}
               />
             </>
@@ -248,18 +278,13 @@ function SkillsCatalog() {
 function SkillRow({
   skill,
   active,
-  canToggle,
-  toggleDisabled,
-  onToggle,
+  activation,
 }: {
   skill: SkillCatalogItem
   active: boolean
-  canToggle: boolean
-  toggleDisabled: boolean
-  onToggle: (name: string) => void
+  activation?: SkillActivation
 }) {
   const project = isProjectSkill(skill)
-  const alwaysEnabled = skill.source === 'ai' || skill.source === 'cezar' || skill.source === 'agents'
   const rowClassName = 'flex min-w-0 flex-1 flex-col gap-0.5 px-2.5 py-2'
   const contents = (
     <>
@@ -273,20 +298,20 @@ function SkillRow({
         >
           {skill.name}
         </span>
-        <SkillSourceTag source={skill.source} className="ml-auto" />
+        <SkillSourceTag source={skill.source} teamRepo={skill.team?.repo} className="ml-auto" />
       </span>
       {skill.description ? <span className="line-clamp-2 text-xs text-soft-foreground">{skill.description}</span> : null}
     </>
   )
   return (
     <li className={cn('flex min-w-0 items-start gap-2 rounded-md transition-colors hover:bg-muted', active && 'bg-muted')}>
-      {canToggle || alwaysEnabled ? (
+      {activation ? (
         <Switch
           data-slot="skill-activation"
-          aria-label={alwaysEnabled ? `${skill.name} is always enabled` : `${skill.enabled ? 'Disable' : 'Enable'} ${skill.name}`}
-          checked={alwaysEnabled || skill.enabled}
-          disabled={alwaysEnabled || toggleDisabled}
-          onCheckedChange={() => onToggle(skill.name)}
+          aria-label={activation.ariaLabel}
+          checked={activation.checked}
+          disabled={activation.disabled}
+          onCheckedChange={activation.onCheckedChange}
           size="sm"
           className="mt-2.5 shrink-0"
         />

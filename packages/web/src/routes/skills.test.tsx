@@ -208,15 +208,20 @@ describe('the catalog list and skill preview', () => {
     await waitFor(() => expect(row.getAttribute('data-enabled')).toBe('false'))
     fireEvent.click(row)
     await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('team-review'))
-    expect(detail()?.querySelector('[data-slot="skill-status"]')?.textContent).toBe('disabled')
+    expect(detail()?.querySelector('[data-slot="skill-status"]')).toBeNull()
+    const detailToggle = detail()?.querySelector<HTMLElement>('[data-slot="skill-activation-detail"]')
+    expect(detailToggle?.getAttribute('data-state')).toBe('unchecked')
+    expect(detail()?.querySelector('[data-slot="skill-source"]')?.getAttribute('title')).toContain(
+      'Shared from open-mercato/skills',
+    )
     expect(detail()?.querySelector('[data-slot="skill-body"]')?.textContent).toContain('Body of team-review.')
     expect(detail()?.querySelector('[data-slot="skill-run-from-github"]')).toBeNull()
-    fireEvent.click(document.querySelector('[data-slot="skills-back"]')!)
-    fireEvent.click(document.querySelector('[data-slot="skill-activation"][aria-label="Enable team-review"]')!)
+    fireEvent.click(detailToggle!)
     await waitFor(() =>
       expect(requests.filter((request) => request.method === 'PUT' && request.url === '/api/v1/workspace/ui-state').at(-1)?.body)
         .toMatchObject({ importedSkills: ['team-review'] }),
     )
+    await waitFor(() => expect(detailToggle?.getAttribute('data-state')).toBe('checked'))
   })
 
   it('keeps disabled skills in alphabetical order with enabled skills', async () => {

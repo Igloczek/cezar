@@ -24,13 +24,42 @@ import { Markdown } from '@/routes/task-thread/markdown'
  * Streamdown/Shiki path the thread uses.
  */
 
+export type SkillActivation = {
+  ariaLabel: string
+  checked: boolean
+  disabled: boolean
+  onCheckedChange: () => void
+}
+
+const SKILL_SOURCE_DESCRIPTIONS: Record<Skill['source'], string> = {
+  ai: 'From this project’s .ai/skills; always enabled while present.',
+  cezar: 'From this project’s .ai/cezar/skills; always enabled while present.',
+  agents: 'From .agents/skills or an agent-specific folder; always enabled while present.',
+  global: 'User-wide from ~/.agents/skills or ~/.claude/skills, shared across projects.',
+  team: 'Shared from a team repository configured for this project; importable skills can be enabled or disabled here.',
+  builtin: 'Built into Cezar rather than installed from a skill repository.',
+}
+
 /** The source tag every skill listing shows — project sources read emphasized (#377). */
-export function SkillSourceTag({ source, className }: { source: Skill['source']; className?: string }) {
+export function SkillSourceTag({
+  source,
+  className,
+  teamRepo,
+}: {
+  source: Skill['source']
+  className?: string
+  teamRepo?: string
+}) {
   const project = isProjectSkill({ source })
+  const description =
+    source === 'team' && teamRepo
+      ? `Shared from ${teamRepo}, a team skills repository configured for this project.`
+      : SKILL_SOURCE_DESCRIPTIONS[source]
   return (
     <span
       data-slot="skill-source"
       data-source={source}
+      title={description}
       className={cn(
         'shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px]',
         project ? 'font-semibold text-foreground' : 'text-soft-foreground',
@@ -47,6 +76,7 @@ export function SkillDetailBody({
   usedBy,
   heading: Heading = 'h2',
   enabled = true,
+  activation,
 }: {
   skill: Skill
   /** "workflow › step" breadcrumbs (`skillUsedBy`). Omit to hide the section (the pickers'
@@ -54,31 +84,39 @@ export function SkillDetailBody({
   usedBy?: readonly string[]
   heading?: 'h2' | 'h3'
   enabled?: boolean
+  activation?: SkillActivation
 }) {
   return (
     <div data-slot="skill-detail" className="mx-auto w-full min-w-0 max-w-[var(--measure)]">
       <section data-slot="skill-properties" className="rounded-lg border border-border bg-muted/20 p-4">
-        <p className="mb-3 text-[11px] font-semibold tracking-[.04em] text-soft-foreground uppercase">
-          Properties
-        </p>
-        <div className="flex min-w-0 flex-wrap items-center gap-2.5">
-          <Heading className="min-w-0 font-mono text-lg font-semibold break-all">{skill.name}</Heading>
-          <SkillSourceTag source={skill.source} />
-          {!enabled ? (
-            <span data-slot="skill-status" className="rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-soft-foreground">
-              disabled
-            </span>
+        <div className="flex min-w-0 items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+              <Heading className="min-w-0 font-mono text-lg font-semibold break-all">{skill.name}</Heading>
+              <SkillSourceTag source={skill.source} teamRepo={skill.team?.repo} />
+            </div>
+            <p data-slot="skill-path" className="mt-1 font-mono text-[10.5px] break-all text-soft-foreground">
+              {skill.path}
+              {skill.team ? ` · from ${skill.team.repo}` : ''}
+            </p>
+            {skill.description ? (
+              <p data-slot="skill-description" className="mt-2.5 text-[13px] text-muted-foreground">
+                {skill.description}
+              </p>
+            ) : null}
+          </div>
+          {activation ? (
+            <Switch
+              data-slot="skill-activation-detail"
+              aria-label={activation.ariaLabel}
+              checked={activation.checked}
+              disabled={activation.disabled}
+              onCheckedChange={activation.onCheckedChange}
+              size="sm"
+              className="mt-1.5 shrink-0"
+            />
           ) : null}
         </div>
-        <p data-slot="skill-path" className="mt-1 font-mono text-[10.5px] break-all text-soft-foreground">
-          {skill.path}
-          {skill.team ? ` · from ${skill.team.repo}` : ''}
-        </p>
-        {skill.description ? (
-          <p data-slot="skill-description" className="mt-2.5 text-[13px] text-muted-foreground">
-            {skill.description}
-          </p>
-        ) : null}
 
         {enabled ? <SkillBookmarklet skill={skill} /> : null}
 

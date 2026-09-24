@@ -105,7 +105,9 @@ export function SkillsUpdateCard({
   if (loadError) message = 'Update status is unavailable right now.'
   else if (state?.status === 'available') message = 'An update is available for your installed Open Mercato skills.'
   else if (state?.status === 'updating') message = 'Updating installed Open Mercato skills…'
-  else if (state?.status === 'current' && !tracked) message = 'No tracked Open Mercato installation found.'
+  else if (state?.status === 'current' && !tracked) {
+    message = state.needsUpgradeNotes ? 'Skill files were updated.' : 'No tracked Open Mercato installation found.'
+  }
   else if (state?.status === 'current') message = 'Installed Open Mercato skills are up to date.'
   else if (state?.status === 'unavailable') {
     message = state.scopes.find((scope) => scope.reason)?.reason ?? 'Automatic updates are unavailable.'
