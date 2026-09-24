@@ -42,7 +42,11 @@ function skillActivation(
   pending: boolean,
   onToggle: (name: string) => void,
 ): SkillActivation | undefined {
-  const alwaysEnabled = skill.source === 'ai' || skill.source === 'cezar' || skill.source === 'agents'
+  const alwaysEnabled =
+    skill.source === 'ai' ||
+    skill.source === 'cezar' ||
+    skill.source === 'agents' ||
+    skill.source === 'global'
   const canToggle = skill.source === 'team' && importableNames.has(skill.name)
   if (!alwaysEnabled && !canToggle) return undefined
 
@@ -289,11 +293,11 @@ function SkillRow({
   const contents = (
     <>
       <span className="flex min-w-0 items-center gap-2">
-        {/* Project skills read bold (#377) — the visual half of the ordering rule. */}
+        {/* Enabled skills read bold; inactive importable skills are muted. */}
         <span
           className={cn(
             'min-w-0 truncate font-mono text-[13px]',
-            project ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground',
+            skill.enabled ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground',
           )}
         >
           {skill.name}
