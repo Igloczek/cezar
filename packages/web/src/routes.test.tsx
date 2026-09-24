@@ -229,7 +229,6 @@ const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
   ['/settings/agents', 'settings-agents', 'Agents'],
   ['/settings/agent-config', 'settings-agent-config', 'Agent config'],
   ['/settings/worktrees', 'settings-worktrees', 'Worktrees'],
-  ['/settings/bookmarklets', 'settings-bookmarklets', 'Bookmarklets'],
   ['/settings/prompt-templates', 'settings-prompt-templates', 'Prompt templates'],
 ]
 

@@ -1,29 +1,43 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeftIcon, DownloadIcon, RefreshCwIcon, SparklesIcon, TriangleAlertIcon, ZapIcon } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowLeftIcon, RefreshCwIcon, SparklesIcon, TriangleAlertIcon } from 'lucide-react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 
-import { Link } from '@/lib/project-router'
+import { Link, useActiveProjectId } from '@/lib/project-router'
 
-import { refreshSkills } from '@/api/client'
-import { queryKeys, useImportableSkills, useProjects, useSkills, useWorkflows } from '@/api/queries'
-import { useProjectScope } from '@/api/project-scope-context'
-import type { Skill } from '@open-mercato/cezar-api-client'
+import { putWorkspaceUiState, refreshSkills } from '@/api/client'
+import {
+  queryKeys,
+  useImportableSkills,
+  useSkills,
+  useSkillsUpdate,
+  useWorkflows,
+  useWorkspaceUiState,
+  workspaceQueryKeys,
+} from '@/api/queries'
+import type { Skill, WorkspaceUiState } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
-import { ImportSkillsPanel, ImportedSkillToggle } from '@/components/skills-import-panel'
 import { SkillDetailBody, SkillSourceTag } from '@/components/skill-detail'
 import { SkillEmptyHint } from '@/components/skill-empty-hint'
+import { SkillsUpdateCard } from '@/components/skills-update-card'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
 import { filterSkills, isProjectSkill, orderSkills, skillUsedBy } from '@/lib/skills'
 import { cn } from '@/lib/utils'
-import { BookmarkletPanel } from './settings/bookmarklets-section'
+
+type SkillCatalogItem = Skill & { enabled: boolean }
+
+function effectiveImported(uiState: WorkspaceUiState | undefined, allNames: readonly string[]): string[] {
+  const value = uiState?.importedSkills
+  return Array.isArray(value)
+    ? value.filter((name): name is string => typeof name === 'string' && !!name)
+    : [...allNames]
+}
 
 /**
- * `/skills` — the skills catalog as its own top-level surface (was `/settings/skills`, moved
- * out of the Settings shell so it stops carrying the settings sub-nav): management by default,
- * with readable skill detail on demand. `/settings/skills` redirects here (routes.tsx), so that
- * legacy entry lands on the management view too.
+ * `/skills` — the skills catalog and selected skill preview. Open Mercato activation stays inline
+ * in the catalog; bookmarklets live in the skill preview that launches them.
  *
  * The standing feedback items stay built in:
  *  - #377 project-first and bold: the list renders through `orderSkills`/`filterSkills`, the
@@ -32,14 +46,7 @@ import { BookmarkletPanel } from './settings/bookmarklets-section'
  *    keyed React elements inside one persistent scroll container — a refresh re-renders rows
  *    in place instead of rebuilding the pane, so neither the selection nor the scroll
  *    position can be lost (the legacy innerHTML rebuild lost both).
- *
- * The pinned "Run from GitHub" entry (spec 011 — must not drown under a long team catalog)
- * opens the bookmarklet panel via the legacy `__bm` sentinel in the same query param.
  */
-
-const BOOKMARKLETS = '__bm'
-const IMPORT = '__import'
-const CATALOG = '__catalog'
 
 export function SkillsRoute() {
   return (
@@ -55,15 +62,45 @@ export function SkillsRoute() {
 }
 
 function SkillsCatalog() {
+  const projectId = useActiveProjectId() ?? ''
+  const updateQuery = useSkillsUpdate(projectId, Boolean(projectId))
   const skillsQuery = useSkills()
   const workflowsQuery = useWorkflows()
   const importableQuery = useImportableSkills()
   const [searchParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const queryClient = useQueryClient()
-  const projects = useProjects()
-  const scope = useProjectScope()
-  const updateProjectId = scope.projectId ?? projects.data?.bootProject ?? ''
+  const workspaceUiState = useWorkspaceUiState()
+  const importable = importableQuery.data ?? []
+  const allImportableNames = useMemo(() => importable.map((skill) => skill.name), [importable])
+  const importableNames = useMemo(() => new Set(allImportableNames), [allImportableNames])
+  const enabledImportable = useMemo(
+    () => new Set(effectiveImported(workspaceUiState.data, allImportableNames)),
+    [workspaceUiState.data, allImportableNames],
+  )
+  const writeChain = useRef<Promise<void>>(Promise.resolve())
+  const latestWrite = useRef(0)
+  const toggleImportedSkill = useCallback((name: string) => {
+    const key = workspaceQueryKeys.uiState
+    const current = queryClient.getQueryData<WorkspaceUiState>(key)
+    const previous = effectiveImported(current, allImportableNames)
+    const next = previous.includes(name) ? previous.filter((entry) => entry !== name) : [...previous, name]
+
+    queryClient.setQueryData(key, { ...current, importedSkills: next })
+    const sequence = ++latestWrite.current
+    writeChain.current = writeChain.current.then(async () => {
+      try {
+        const merged = await putWorkspaceUiState({ importedSkills: next })
+        if (sequence !== latestWrite.current) return
+        queryClient.setQueryData(key, merged)
+        void queryClient.invalidateQueries({ queryKey: queryKeys.skills })
+      } catch (error: unknown) {
+        if (sequence !== latestWrite.current) return
+        toast(error instanceof Error ? error.message : String(error), { tone: 'danger' })
+        void queryClient.invalidateQueries({ queryKey: key })
+      }
+    })
+  }, [allImportableNames, queryClient])
 
   const refresh = useMutation({
     mutationFn: () => refreshSkills(),
@@ -88,23 +125,20 @@ function SkillsCatalog() {
   }
 
   const skills = orderSkills(skillsQuery.data ?? [])
-  // Only pin a separate import entry when the default (vendor) repo has skills to import —
-  // a repo with its own configured `skillsRepos` gates nothing, so the endpoint answers empty.
-  const canImport = (importableQuery.data?.length ?? 0) > 0
+  const activeNames = new Set(skills.map((skill) => skill.name))
+  const catalog = orderSkills<SkillCatalogItem>([
+    ...skills.map((skill) => ({
+      ...skill,
+      enabled: skill.source === 'team' && importableNames.has(skill.name) ? enabledImportable.has(skill.name) : true,
+    })),
+    ...importable
+      .filter((skill) => !activeNames.has(skill.name))
+      .map((skill) => ({ ...skill, enabled: enabledImportable.has(skill.name) })),
+  ].sort((a, b) => a.name.localeCompare(b.name)))
   const param = searchParams.get('skill')
-  // Management is the default surface. A skill detail opens only for an explicit skill URL/row
-  // selection; a vanished selection degrades back to management rather than a read-only detail.
-  // Pinned panels and the mobile catalog surface are sentinels, not catalog names.
-  const defaultSelection = IMPORT
-  const selection =
-    param === BOOKMARKLETS || param === IMPORT || param === CATALOG
-      ? param
-      : param !== null && skills.some((skill) => skill.name === param)
-        ? param
-        : defaultSelection
-  const detailSelection = selection === CATALOG ? defaultSelection : selection
-  const selected = skills.find((skill) => skill.name === detailSelection) ?? null
-  const shown = filterSkills(skills, query)
+  const selected = catalog.find((skill) => skill.name === param) ?? (param === null ? catalog.find((skill) => skill.enabled) : null) ?? null
+  const selection = selected?.name ?? null
+  const shown = filterSkills(catalog, query)
 
   return (
     <div data-slot="skills-section" className="flex min-h-full flex-1 items-stretch">
@@ -113,11 +147,11 @@ function SkillsCatalog() {
       <section
         data-slot="skills-list"
         className={cn(
-          'w-full flex-col border-border md:flex md:w-[320px] md:shrink-0 md:border-r',
+          'w-full flex-col border-border md:flex md:w-96 md:shrink-0 md:border-r',
           // Pin the pane below the sticky h-14 header so the ROWS scroll inside it (the #384
           // stable-scroll surface) — `var(--spacing)*14` tracks the density token.
           'md:sticky md:top-14 md:max-h-[calc(100dvh-(var(--spacing)*14))]',
-          selection === CATALOG ? 'flex' : 'hidden md:flex',
+          param === null || !selected ? 'flex' : 'hidden md:flex',
         )}
       >
         <div className="flex shrink-0 items-center gap-2 p-3 pb-2">
@@ -144,10 +178,11 @@ function SkillsCatalog() {
             Refresh
           </button>
         </div>
-
-        <p className="px-3 pb-2 text-[11px] leading-relaxed text-soft-foreground">
-          Open Mercato skills can be enabled here. Other skill sources have no activation setting in cezar.
-        </p>
+        {projectId ? (
+          <div className="shrink-0 px-3 pb-2">
+            <SkillsUpdateCard projectId={projectId} state={updateQuery.data} loadError={updateQuery.error} />
+          </div>
+        ) : null}
 
         <ul data-slot="skill-rows" className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
           {skillsQuery.isPending ? (
@@ -155,96 +190,46 @@ function SkillsCatalog() {
           ) : shown.length > 0 ? (
             shown.map((skill) => (
               <SkillRow
-                key={skill.path}
+                key={skill.name}
                 skill={skill}
                 active={selection === skill.name}
-                canToggle={skill.source === 'team' && (importableQuery.data ?? []).some((item) => item.name === skill.name)}
+                canToggle={skill.source === 'team' && importableNames.has(skill.name)}
+                toggleDisabled={workspaceUiState.isPending}
+                onToggle={toggleImportedSkill}
               />
             ))
           ) : (
             <li className="px-2.5 py-2 text-xs leading-relaxed text-soft-foreground">
-              {skills.length > 0 ? '(no skills match)' : <SkillEmptyHint />}
+              {catalog.length > 0 ? '(no skills match)' : <SkillEmptyHint />}
             </li>
           )}
         </ul>
-
-        {/* Always visible below the scrollable rows — the pinned panels. */}
-        <div className="shrink-0 border-t border-border p-2">
-          {canImport ? (
-            <Link
-              to={`/skills?skill=${IMPORT}`}
-              data-slot="import-skills-row"
-              aria-current={selection === IMPORT ? 'page' : undefined}
-              className={cn(
-                'mb-1 flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
-                selection === IMPORT && 'bg-muted',
-              )}
-            >
-              <span className="flex min-w-0 items-center gap-2">
-                <DownloadIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
-                <span className="min-w-0 truncate text-[13px] font-medium">Manage skills</span>
-                <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-soft-foreground">
-                  open-mercato
-                </span>
-              </span>
-              <span className="pl-[22px] text-xs text-soft-foreground">
-                Choose which open-mercato skills appear in your catalog.
-              </span>
-            </Link>
-          ) : null}
-          <Link
-            to={`/skills?skill=${BOOKMARKLETS}`}
-            data-slot="bookmarklets-row"
-            aria-current={selection === BOOKMARKLETS ? 'page' : undefined}
-            className={cn(
-              'flex flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
-              selection === BOOKMARKLETS && 'bg-muted',
-            )}
-          >
-            <span className="flex min-w-0 items-center gap-2">
-              <ZapIcon aria-hidden="true" className="size-3.5 shrink-0 text-primary" />
-              <span className="min-w-0 truncate text-[13px] font-medium">Run from GitHub</span>
-              <span className="ml-auto shrink-0 rounded-full border border-border px-2 py-px font-mono text-[10.5px] text-soft-foreground">
-                bookmarklets
-              </span>
-            </span>
-            <span className="pl-[22px] text-xs text-soft-foreground">
-              One-click skill launch from any GitHub PR or issue.
-            </span>
-          </Link>
-        </div>
       </section>
 
-      {/* Management/detail pane is the default; the catalog has an explicit mobile URL. */}
+      {/* A selected skill is previewed beside the catalog, or replaces it on mobile. */}
       <section
         data-slot="skills-detail"
-        className={cn('min-w-0 flex-1 flex-col', selection === CATALOG ? 'hidden md:flex' : 'flex')}
+        className={cn('min-w-0 flex-1 flex-col', param === null || !selected ? 'hidden md:flex' : 'flex')}
       >
         <div className="min-w-0 flex-1 px-4 py-4 md:px-7 md:py-5">
-          <Link
-            to={`/skills?skill=${CATALOG}`}
-            data-slot="skills-back"
-            className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden"
-          >
-            <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
-            Browse skills
-          </Link>
-
-          {selection === CATALOG ? (
-            defaultSelection === IMPORT ? (
-              <ImportSkillsPanel projectId={updateProjectId} />
-            ) : (
-              <BookmarkletPanel skills={skills} />
-            )
-          ) : selection === IMPORT ? (
-            <ImportSkillsPanel projectId={updateProjectId} />
-          ) : selection === BOOKMARKLETS ? (
-            <BookmarkletPanel skills={skills} />
-          ) : selected ? (
-            <SkillDetailBody
-              skill={selected}
-              usedBy={skillUsedBy(workflowsQuery.data?.workflows ?? [], selected.name)}
-            />
+          {selected ? (
+            <>
+              {param !== null ? (
+                <Link
+                  to="/skills"
+                  data-slot="skills-back"
+                  className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground md:hidden"
+                >
+                  <ArrowLeftIcon aria-hidden="true" className="size-3.5" />
+                  Back to skills
+                </Link>
+              ) : null}
+              <SkillDetailBody
+                skill={selected}
+                enabled={selected.enabled}
+                usedBy={skillUsedBy(workflowsQuery.data?.workflows ?? [], selected.name)}
+              />
+            </>
           ) : skillsQuery.isPending ? null : (
             <CenteredState
               icon={<SparklesIcon />}
@@ -260,46 +245,65 @@ function SkillsCatalog() {
   )
 }
 
-function SkillRow({ skill, active, canToggle }: { skill: Skill; active: boolean; canToggle: boolean }) {
+function SkillRow({
+  skill,
+  active,
+  canToggle,
+  toggleDisabled,
+  onToggle,
+}: {
+  skill: SkillCatalogItem
+  active: boolean
+  canToggle: boolean
+  toggleDisabled: boolean
+  onToggle: (name: string) => void
+}) {
   const project = isProjectSkill(skill)
+  const rowClassName = cn(
+    'flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
+    active && 'bg-muted',
+  )
+  const contents = (
+    <>
+      <span className="flex min-w-0 items-center gap-2">
+        {/* Project skills read bold (#377) — the visual half of the ordering rule. */}
+        <span
+          className={cn(
+            'min-w-0 truncate font-mono text-[13px]',
+            project ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground',
+          )}
+        >
+          {skill.name}
+        </span>
+        <SkillSourceTag source={skill.source} className="ml-auto" />
+      </span>
+      {skill.description ? <span className="line-clamp-2 text-xs text-soft-foreground">{skill.description}</span> : null}
+    </>
+  )
   return (
     <li className="flex items-start gap-2">
+      {canToggle ? (
+        <Switch
+          data-slot="skill-activation"
+          aria-label={`${skill.enabled ? 'Disable' : 'Enable'} ${skill.name}`}
+          checked={skill.enabled}
+          disabled={toggleDisabled}
+          onCheckedChange={() => onToggle(skill.name)}
+          size="sm"
+          className="mt-2 shrink-0"
+        />
+      ) : null}
       <Link
         to={`/skills?skill=${encodeURIComponent(skill.name)}`}
         data-slot="skill-row"
         data-skill={skill.name}
         data-project={project ? 'true' : undefined}
+        data-enabled={skill.enabled ? 'true' : 'false'}
         aria-current={active ? 'page' : undefined}
-        className={cn(
-          'flex min-w-0 flex-1 flex-col gap-0.5 rounded-md px-2.5 py-2 transition-colors hover:bg-muted',
-          active && 'bg-muted',
-        )}
+        className={rowClassName}
       >
-        <span className="flex min-w-0 items-center gap-2">
-          <SparklesIcon
-            aria-hidden="true"
-            className={cn('size-3.5 shrink-0', project ? 'text-violet' : 'text-soft-foreground')}
-          />
-          {/* Project skills read bold (#377) — the visual half of the ordering rule. */}
-          <span
-            className={cn(
-              'min-w-0 truncate font-mono text-[13px]',
-              project ? 'font-semibold text-foreground' : 'font-medium text-muted-foreground',
-            )}
-          >
-            {skill.name}
-          </span>
-          <SkillSourceTag source={skill.source} className="ml-auto" />
-        </span>
-        {skill.description ? (
-          <span className="line-clamp-2 pl-[22px] text-xs text-soft-foreground">{skill.description}</span>
-        ) : null}
+        {contents}
       </Link>
-      {canToggle ? (
-        <span className="mt-2.5 shrink-0" onClick={(event) => event.stopPropagation()}>
-          <ImportedSkillToggle name={skill.name} />
-        </span>
-      ) : null}
     </li>
   )
 }
