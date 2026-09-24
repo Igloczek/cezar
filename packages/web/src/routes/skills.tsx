@@ -304,7 +304,7 @@ function SkillRow({
     </>
   )
   return (
-    <li className={cn('flex min-w-0 items-start gap-2 rounded-md transition-colors hover:bg-muted', active && 'bg-muted')}>
+    <li className={cn('flex min-w-0 items-start gap-0 rounded-md transition-colors hover:bg-muted', active && 'bg-muted')}>
       {activation ? (
         <Switch
           data-slot="skill-activation"
@@ -313,7 +313,7 @@ function SkillRow({
           disabled={activation.disabled}
           onCheckedChange={activation.onCheckedChange}
           size="sm"
-          className="mt-2.5 shrink-0"
+          className="mt-2.5 ml-2 shrink-0"
         />
       ) : null}
       <Link
