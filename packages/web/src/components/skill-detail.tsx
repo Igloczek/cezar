@@ -1,13 +1,13 @@
 import { ArrowRightIcon } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 import { Link } from '@/lib/project-router'
 
 import { useHealth, useLaunchKey, useProjects } from '@/api/queries'
 import type { Skill } from '@open-mercato/cezar-api-client'
 import { repoChipOf } from '@/components/app-shell-container'
+import { BookmarkletRow } from '@/components/bookmarklet-row'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
-import { toast } from '@/components/ui/toaster'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { bookmarkletUrl } from '@/lib/bookmarklet'
 import { isProjectSkill } from '@/lib/skills'
@@ -168,7 +168,6 @@ function SkillBookmarklet({ skill }: { skill: Skill }) {
   const health = useHealth()
   const projects = useProjects()
   const [auto, setAuto] = useState(false)
-  const anchor = useRef<HTMLAnchorElement>(null)
   const key = launchKey.data?.key ?? ''
   const origin = window.location.origin
   const projectId = useActiveProjectId() ?? health.data?.bootProject ?? null
@@ -177,11 +176,6 @@ function SkillBookmarklet({ skill }: { skill: Skill }) {
     repoChipOf(health.data)?.name ??
     null
   const url = bookmarkletUrl(skill.name, auto, key, origin, projectId)
-
-  useEffect(() => {
-    anchor.current?.setAttribute('href', url)
-  }, [url])
-
   return (
     <section data-slot="skill-run-from-github" className="mt-5 border-t border-border pt-4">
       <h3 className="text-[11px] font-semibold tracking-[.04em] text-soft-foreground uppercase">Run from GitHub</h3>
@@ -198,34 +192,13 @@ function SkillBookmarklet({ skill }: { skill: Skill }) {
         />
         <span>Start automatically</span>
       </div>
-      <div className="mt-3 flex items-center gap-2.5">
-        <a
-          ref={anchor}
-          draggable
-          title="Drag me to your bookmarks bar"
-          onClick={(event) => {
-            event.preventDefault()
-            toast('Drag me to your bookmarks bar')
-          }}
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2.5 py-1 font-mono text-xs font-medium shadow-xs hover:bg-muted"
-        >
-          {repoName ? `/${skill.name} (${repoName})` : `/${skill.name}`}
-        </a>
-        <button
-          type="button"
-          data-slot="skill-bookmarklet-copy"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(url)
-              toast('Bookmarklet URL copied.')
-            } catch {
-              toast('Copy failed — drag the button instead.', { tone: 'danger' })
-            }
-          }}
-          className="text-xs font-medium text-muted-foreground hover:text-foreground"
-        >
-          Copy
-        </button>
+      <div className="mt-3">
+        <BookmarkletRow
+          label={repoName ? `/${skill.name} (${repoName})` : `/${skill.name}`}
+          url={url}
+          showIcon={false}
+          copySlot="skill-bookmarklet-copy"
+        />
       </div>
       <p className="mt-2 text-xs text-soft-foreground">
         To update an existing bookmarklet after changing this option, drag the button to your bookmarks bar again.
