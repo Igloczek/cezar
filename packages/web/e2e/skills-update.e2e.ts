@@ -56,7 +56,7 @@ describe('automatic Open Mercato skills updates', () => {
     expect(browser.isVisible('[data-slot="skills-auto-update"]')).toBe(true)
     expect(browser.text('[data-slot="skills-settings-section"]')).toContain('On (default)')
     expect(browser.text('[data-slot="skills-installation-status"]')).toContain(
-      'No tracked Open Mercato installation found.',
+      'No installed Open Mercato skills are tracked for updates.',
     )
     browser.screenshot(`${artifactsDir}/settings-skills-auto-update.png`)
 

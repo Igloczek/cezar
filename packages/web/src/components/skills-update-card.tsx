@@ -106,7 +106,7 @@ export function SkillsUpdateCard({
   else if (state?.status === 'available') message = 'An update is available for your installed Open Mercato skills.'
   else if (state?.status === 'updating') message = 'Updating installed Open Mercato skills…'
   else if (state?.status === 'current' && !tracked) {
-    message = state.needsUpgradeNotes ? 'Skill files were updated.' : 'No tracked Open Mercato installation found.'
+    message = state.needsUpgradeNotes ? 'Skill files were updated.' : 'No installed Open Mercato skills are tracked for updates.'
   }
   else if (state?.status === 'current') message = 'Installed Open Mercato skills are up to date.'
   else if (state?.status === 'unavailable') {
