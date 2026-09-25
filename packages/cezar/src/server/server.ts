@@ -755,6 +755,8 @@ const uiStateSchema = z
     lastWorktree: z.boolean().optional(),
     lastAutonomous: z.boolean().optional(),
     lastGenerateFollowups: z.boolean().optional(),
+    // Default team-skill curation belongs to this repo's ui-state, never the workspace state.
+    importedSkills: z.array(z.string().min(1).max(200)).max(UI_STATE_MAX_KEYS).optional(),
     // Skill selection frequency (#408): name → times chosen, incremented on a successful run
     // start from EITHER composer (`/new`'s SourcePill and the follow-up `SkillsPicker`). Drives
     // the shared `orderSkillsByUsage` sort (web/app/src/lib/skills.ts) so both pickers float the
@@ -802,8 +804,7 @@ const uiStateSchema = z
       .optional(),
     // Skills promo banner (#391): set once the cockpit banner is dismissed, never unset.
     // Server-persisted (not a cookie) so the "shown once" promise holds across browsers.
-    // Retained for backward compatibility — the banner is gone, replaced by the workspace-level
-    // `importedSkills` curation (see `workspaceUiStateSchema`); `.passthrough()` would preserve
+    // Retained for backward compatibility — the banner is gone; `.passthrough()` would preserve
     // the key regardless, but keep it typed.
     dismissedSkillsBanner: z.boolean().optional(),
   })

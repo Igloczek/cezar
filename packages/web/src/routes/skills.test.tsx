@@ -73,19 +73,20 @@ function serve({
   refreshed = SKILLS,
   importable = [],
   importableFailure = false,
-  workspaceUiState = {},
+  uiState = {},
   skillsUpdate = CURRENT_SKILLS_UPDATE,
 }: {
   skills?: Skill[]
   refreshed?: Skill[]
   importable?: Skill[]
   importableFailure?: boolean
-  workspaceUiState?: Record<string, unknown>
+  uiState?: Record<string, unknown>
   skillsUpdate?: SkillsUpdateState
 } = {}) {
   requests = []
-  // Skill activation lives in GLOBAL ui-state, whose PUT answers the merged state.
-  let global: Record<string, unknown> = { ...workspaceUiState }
+  // Skill activation lives in the active project's ui-state.
+  const projectStates = new Map<string, Record<string, unknown>>([['boot', { ...uiState }]])
+  let workspaceState: Record<string, unknown> = {}
   const json = (payload: unknown) =>
     new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
   vi.stubGlobal(
@@ -93,12 +94,14 @@ function serve({
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       const path = url.replace(/^\/api\/v1\/p\/[^/]+/, '/api/v1')
+      const scope = /^\/api\/v1\/p\/([^/]+)/.exec(url)?.[1] ?? 'boot'
+      const projectState = projectStates.get(scope) ?? {}
       const method = init?.method ?? 'GET'
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
       requests.push({ method, url, body })
       if (path === '/api/v1/skills' && method === 'GET') {
-        const selected = Array.isArray(global.importedSkills)
-          ? new Set(global.importedSkills as string[])
+        const selected = Array.isArray(projectState.importedSkills)
+          ? new Set(projectState.importedSkills as string[])
           : new Set(importable.map((item) => item.name))
         return json(
           skills.filter(
@@ -124,11 +127,16 @@ function serve({
           needsUpgradeNotes: true,
         })
       }
-      if (path === '/api/v1/ui-state') return json({}) // Per-repo preferences are not used here.
-      if (path === '/api/v1/workspace/ui-state' && method === 'GET') return json(global)
+      if (path === '/api/v1/ui-state' && method === 'GET') return json(projectState)
+      if (path === '/api/v1/ui-state' && method === 'PUT') {
+        const merged = { ...projectState, ...(body as Record<string, unknown>) }
+        projectStates.set(scope, merged)
+        return json(merged)
+      }
+      if (path === '/api/v1/workspace/ui-state' && method === 'GET') return json(workspaceState)
       if (path === '/api/v1/workspace/ui-state' && method === 'PUT') {
-        global = { ...global, ...(body as Record<string, unknown>) }
-        return json(global)
+        workspaceState = { ...workspaceState, ...(body as Record<string, unknown>) }
+        return json(workspaceState)
       }
       return new Promise<never>(() => {})
     }),
@@ -239,9 +247,13 @@ describe('the catalog list and skill preview', () => {
     expect(toggle.getAttribute('data-state')).toBe('checked')
     fireEvent.click(toggle)
     await waitFor(() =>
-      expect(requests.filter((request) => request.method === 'PUT' && request.url === '/api/v1/workspace/ui-state').at(-1)?.body)
+      expect(requests.filter((request) => request.method === 'PUT' && request.url.endsWith('/ui-state')).at(-1)?.body)
         .toMatchObject({ importedSkills: [] }),
     )
+    expect(
+      requests.find((request) => request.method === 'PUT' && Array.isArray((request.body as { importedSkills?: unknown })?.importedSkills))
+        ?.url,
+    ).toBe('/api/v1/ui-state')
     await waitFor(() => expect(row.getAttribute('data-enabled')).toBe('false'))
     fireEvent.click(row)
     await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('team-review'))
@@ -257,7 +269,7 @@ describe('the catalog list and skill preview', () => {
     expect(detail()?.querySelector('[data-slot="skill-run-from-github"]')).toBeNull()
     fireEvent.click(detailToggle!)
     await waitFor(() =>
-      expect(requests.filter((request) => request.method === 'PUT' && request.url === '/api/v1/workspace/ui-state').at(-1)?.body)
+      expect(requests.filter((request) => request.method === 'PUT' && request.url.endsWith('/ui-state')).at(-1)?.body)
         .toMatchObject({ importedSkills: ['team-review'] }),
     )
     await waitFor(() => expect(detailToggle?.getAttribute('data-state')).toBe('checked'))
@@ -269,13 +281,44 @@ describe('the catalog list and skill preview', () => {
     serve({
       skills: [...SKILLS, enabled],
       importable: [disabled, enabled],
-      workspaceUiState: { importedSkills: ['team-zeta'] },
+      uiState: { importedSkills: ['team-zeta'] },
     })
     renderAt('/skills')
 
     await waitFor(() => expect(rowNames()).toHaveLength(5))
     expect(rowNames()).toEqual(['om-fix', 'om-review', 'team-alpha', 'team-zeta', 'zebra-global'])
     expect(document.querySelector('[data-slot="skill-row"][data-skill="team-alpha"]')?.getAttribute('data-enabled')).toBe('false')
+  })
+
+  it('writes a team-skill choice to the active project ui-state', async () => {
+    const importedSkill = openMercatoSkill('team-review')
+    serve({ skills: [...SKILLS, importedSkill], importable: [importedSkill] })
+    const client = gateSeededClient()
+    client.setQueryData(workspaceQueryKeys.projects, {
+      projects: [
+        {
+          id: 'other',
+          name: 'other',
+          root: '/other',
+          addedAt: '2026-09-24T12:00:00.000Z',
+          lastOpenedAt: '2026-09-24T12:00:00.000Z',
+          source: 'local',
+          status: 'ok',
+        },
+      ],
+      bootProject: 'boot',
+      projectsDir: '~/cezar/projects',
+    })
+    renderAt('/p/other/skills', client)
+    const toggle = await screen.findByRole('switch', { name: 'Disable team-review' })
+
+    fireEvent.click(toggle)
+    await waitFor(() => {
+      expect(requests.find((request) => request.method === 'PUT' && request.url.endsWith('/ui-state'))).toMatchObject({
+        url: '/api/v1/p/other/ui-state',
+        body: { importedSkills: [] },
+      })
+    })
   })
 
   it('checks and applies installed skill updates for the active project', async () => {
@@ -335,7 +378,7 @@ describe('the catalog list and skill preview', () => {
     const fetchNormally = fetchMock.getMockImplementation()!
     const writes: Array<{ body: unknown; resolve: (response: Response) => void }> = []
     fetchMock.mockImplementation(async (input, init) => {
-      if (String(input) === '/api/v1/workspace/ui-state' && init?.method === 'PUT') {
+      if (String(input).endsWith('/ui-state') && init?.method === 'PUT') {
         const body = JSON.parse(String(init.body)) as unknown
         return new Promise<Response>((resolve) => writes.push({ body, resolve }))
       }
@@ -355,7 +398,7 @@ describe('the catalog list and skill preview', () => {
     expect(writes[1]?.body).toEqual({ importedSkills: [] })
     await act(async () => writes[1]?.resolve(response({ importedSkills: [] })))
     await waitFor(() =>
-      expect((client.getQueryData(workspaceQueryKeys.uiState) as { importedSkills?: string[] })?.importedSkills).toEqual([]),
+      expect((client.getQueryData(queryKeys.uiState) as { importedSkills?: string[] })?.importedSkills).toEqual([]),
     )
   })
 

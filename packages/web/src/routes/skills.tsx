@@ -5,17 +5,16 @@ import { useSearchParams } from 'react-router'
 
 import { Link, useActiveProjectId } from '@/lib/project-router'
 
-import { putWorkspaceUiState, refreshSkills } from '@/api/client'
+import { putUiState, refreshSkills } from '@/api/client'
 import {
   queryKeys,
   useImportableSkills,
   useSkills,
   useSkillsUpdate,
+  useUiState,
   useWorkflows,
-  useWorkspaceUiState,
-  workspaceQueryKeys,
 } from '@/api/queries'
-import type { Skill, WorkspaceUiState } from '@open-mercato/cezar-api-client'
+import type { Skill, UiState } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { SkillDetailBody, SkillSourceTag } from '@/components/skill-detail'
 import type { SkillActivation } from '@/components/skill-detail'
@@ -30,7 +29,7 @@ import { cn } from '@/lib/utils'
 
 type SkillCatalogItem = Skill & { enabled: boolean }
 
-function effectiveImported(uiState: WorkspaceUiState | undefined, allNames: readonly string[]): string[] {
+function effectiveImported(uiState: UiState | undefined, allNames: readonly string[]): string[] {
   const value = uiState?.importedSkills
   return Array.isArray(value)
     ? value.filter((name): name is string => typeof name === 'string' && !!name)
@@ -97,19 +96,19 @@ function SkillsCatalog() {
   const [searchParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const queryClient = useQueryClient()
-  const workspaceUiState = useWorkspaceUiState()
+  const uiState = useUiState()
   const importable = importableQuery.data ?? []
   const allImportableNames = useMemo(() => importable.map((skill) => skill.name), [importable])
   const importableNames = useMemo(() => new Set(allImportableNames), [allImportableNames])
   const enabledImportable = useMemo(
-    () => new Set(effectiveImported(workspaceUiState.data, allImportableNames)),
-    [workspaceUiState.data, allImportableNames],
+    () => new Set(effectiveImported(uiState.data, allImportableNames)),
+    [uiState.data, allImportableNames],
   )
   const writeChain = useRef<Promise<void>>(Promise.resolve())
   const latestWrite = useRef(0)
   const toggleImportedSkill = useCallback((name: string) => {
-    const key = workspaceQueryKeys.uiState
-    const current = queryClient.getQueryData<WorkspaceUiState>(key)
+    const key = queryKeys.uiState
+    const current = queryClient.getQueryData<UiState>(key)
     const previous = effectiveImported(current, allImportableNames)
     const next = previous.includes(name) ? previous.filter((entry) => entry !== name) : [...previous, name]
 
@@ -117,7 +116,7 @@ function SkillsCatalog() {
     const sequence = ++latestWrite.current
     writeChain.current = writeChain.current.then(async () => {
       try {
-        const merged = await putWorkspaceUiState({ importedSkills: next })
+        const merged = await putUiState({ importedSkills: next })
         if (sequence !== latestWrite.current) return
         queryClient.setQueryData(key, merged)
         void queryClient.invalidateQueries({ queryKey: queryKeys.skills })
@@ -166,7 +165,7 @@ function SkillsCatalog() {
   const selected = catalog.find((skill) => skill.name === param) ?? (param === null ? catalog.find((skill) => skill.enabled) : null) ?? null
   const selection = selected?.name ?? null
   const selectedActivation = selected
-    ? skillActivation(selected, importableNames, workspaceUiState.isPending, toggleImportedSkill, importableQuery.isError)
+    ? skillActivation(selected, importableNames, uiState.isPending, toggleImportedSkill, importableQuery.isError)
     : undefined
   const shown = filterSkills(catalog, query)
 
@@ -248,7 +247,7 @@ function SkillsCatalog() {
                 activation={skillActivation(
                   skill,
                   importableNames,
-                  workspaceUiState.isPending,
+                  uiState.isPending,
                   toggleImportedSkill,
                   importableQuery.isError,
                 )}

@@ -58,6 +58,13 @@ describe('the ui-state API — skillUsage (#408)', () => {
     expect(rawFile().skillUsage).toEqual({ 'om-fix': 1, 'om-review': 3 });
   });
 
+  it('persists team-skill selection in this project ui-state', async () => {
+    const res = await put({ importedSkills: ['om-fix'] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ importedSkills: ['om-fix'] });
+    expect(rawFile().importedSkills).toEqual(['om-fix']);
+  });
+
   it('a later PUT replaces the whole map (shallow merge) — clients must send the FULL map', async () => {
     await put({ skillUsage: { 'om-fix': 1, 'om-review': 3 } });
     // Sending only the bumped entry would silently drop om-review — the client-side
