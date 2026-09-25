@@ -203,6 +203,13 @@ function SkillBookmarklet({ skill }: { skill: Skill }) {
       <p className="mt-2 text-xs text-soft-foreground">
         To update an existing bookmarklet after changing this option, drag the button to your bookmarks bar again.
       </p>
+      <Link
+        to="/settings/bookmarklets"
+        data-slot="skill-bookmarklets-settings"
+        className="mt-2 inline-block text-xs font-medium text-violet hover:underline"
+      >
+        Manage saved bookmarklets
+      </Link>
     </section>
   )
 }

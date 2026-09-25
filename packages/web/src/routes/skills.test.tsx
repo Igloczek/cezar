@@ -428,7 +428,11 @@ describe('the selected skill GitHub launcher', () => {
     renderAt('/skills?skill=om-fix')
     await waitFor(() => expect(document.querySelector('[data-slot="skill-run-from-github"]')).not.toBeNull())
 
-    const link = document.querySelector<HTMLAnchorElement>('[data-slot="skill-run-from-github"] a')!
+    const bookmarkletSettings = document.querySelector<HTMLAnchorElement>('[data-slot="skill-bookmarklets-settings"]')!
+    expect(bookmarkletSettings.textContent).toBe('Manage saved bookmarklets')
+    expect(bookmarkletSettings.getAttribute('href')).toBe('/p/boot/settings/bookmarklets')
+
+    const link = document.querySelector<HTMLAnchorElement>('[data-slot="skill-run-from-github"] [data-slot="bm-link"]')!
     await waitFor(() => expect(decodeURIComponent(link.getAttribute('href') ?? '')).toContain('auto=0&key=sekret'))
     expect(link.getAttribute('href')?.startsWith('javascript:')).toBe(true)
     fireEvent.click(document.querySelector('[data-slot="bookmarklet-auto"]')!)
