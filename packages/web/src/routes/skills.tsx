@@ -21,6 +21,7 @@ import { SkillDetailBody, SkillSourceTag } from '@/components/skill-detail'
 import type { SkillActivation } from '@/components/skill-detail'
 import { SkillEmptyHint } from '@/components/skill-empty-hint'
 import { SkillsUpdateCard } from '@/components/skills-update-card'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { toast } from '@/components/ui/toaster'
@@ -41,13 +42,14 @@ function skillActivation(
   importableNames: ReadonlySet<string>,
   pending: boolean,
   onToggle: (name: string) => void,
+  importableUnavailable = false,
 ): SkillActivation | undefined {
   const alwaysEnabled =
     skill.source === 'ai' ||
     skill.source === 'cezar' ||
     skill.source === 'agents' ||
     skill.source === 'global'
-  const canToggle = skill.source === 'team' && importableNames.has(skill.name)
+  const canToggle = skill.source === 'team' && (importableNames.has(skill.name) || importableUnavailable)
   if (!alwaysEnabled && !canToggle) return undefined
 
   return {
@@ -55,7 +57,7 @@ function skillActivation(
       ? `${skill.name} is always enabled`
       : `${skill.enabled ? 'Disable' : 'Enable'} ${skill.name}`,
     checked: alwaysEnabled || skill.enabled,
-    disabled: alwaysEnabled || pending,
+    disabled: alwaysEnabled || pending || importableUnavailable,
     onCheckedChange: () => onToggle(skill.name),
   }
 }
@@ -164,15 +166,8 @@ function SkillsCatalog() {
   const selected = catalog.find((skill) => skill.name === param) ?? (param === null ? catalog.find((skill) => skill.enabled) : null) ?? null
   const selection = selected?.name ?? null
   const selectedActivation = selected
-    ? skillActivation(selected, importableNames, workspaceUiState.isPending, toggleImportedSkill)
+    ? skillActivation(selected, importableNames, workspaceUiState.isPending, toggleImportedSkill, importableQuery.isError)
     : undefined
-  const hasTrackedUpdateSkills = updateQuery.data?.scopes.some((scope) => scope.skills.length > 0) ?? false
-  const showSkillsUpdate = Boolean(projectId) && (
-    updateQuery.isError ||
-    updateQuery.data?.status !== 'current' ||
-    hasTrackedUpdateSkills ||
-    updateQuery.data?.needsUpgradeNotes === true
-  )
   const shown = filterSkills(catalog, query)
 
   return (
@@ -213,9 +208,31 @@ function SkillsCatalog() {
             Refresh
           </button>
         </div>
-        {showSkillsUpdate ? (
+        {projectId ? (
           <div className="shrink-0 px-3 pb-2">
             <SkillsUpdateCard projectId={projectId} state={updateQuery.data} loadError={updateQuery.error} />
+          </div>
+        ) : null}
+        {importableQuery.isError ? (
+          <div
+            data-slot="skills-importable-error"
+            role="alert"
+            className="mx-3 mb-2 flex shrink-0 items-center justify-between gap-3 rounded-md border border-danger/20 bg-danger/10 px-3 py-2 text-xs text-danger"
+          >
+            <p className="min-w-0">
+              Could not load the Open Mercato skills catalog. Team skills may be missing until it loads.{' '}
+              {importableQuery.error.message}
+            </p>
+            <Button
+              type="button"
+              data-action="skills-importable-retry"
+              variant="ghost"
+              size="sm"
+              disabled={importableQuery.isFetching}
+              onClick={() => void importableQuery.refetch()}
+            >
+              Retry
+            </Button>
           </div>
         ) : null}
 
@@ -228,7 +245,13 @@ function SkillsCatalog() {
                 key={skill.name}
                 skill={skill}
                 active={selection === skill.name}
-                activation={skillActivation(skill, importableNames, workspaceUiState.isPending, toggleImportedSkill)}
+                activation={skillActivation(
+                  skill,
+                  importableNames,
+                  workspaceUiState.isPending,
+                  toggleImportedSkill,
+                  importableQuery.isError,
+                )}
               />
             ))
           ) : (

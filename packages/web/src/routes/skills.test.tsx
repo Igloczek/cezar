@@ -72,12 +72,14 @@ function serve({
   skills = SKILLS,
   refreshed = SKILLS,
   importable = [],
+  importableFailure = false,
   workspaceUiState = {},
   skillsUpdate = CURRENT_SKILLS_UPDATE,
 }: {
   skills?: Skill[]
   refreshed?: Skill[]
   importable?: Skill[]
+  importableFailure?: boolean
   workspaceUiState?: Record<string, unknown>
   skillsUpdate?: SkillsUpdateState
 } = {}) {
@@ -106,7 +108,9 @@ function serve({
       }
       if (path === '/api/v1/skills/refresh' && method === 'POST') return json(refreshed)
       // Both the fast read and the ?wait=1 convergence read hit this endpoint.
-      if (path.startsWith('/api/v1/skills/importable')) return json(importable)
+      if (path.startsWith('/api/v1/skills/importable')) {
+        return importableFailure ? new Response('skills catalog unavailable', { status: 503 }) : json(importable)
+      }
       if (path === '/api/v1/workflows') return json(WORKFLOWS)
       if (url === '/api/v1/launch-key') return json({ key: 'sekret' })
       if (path.startsWith('/api/v1/workspace/skills-update?projectId=')) return json(skillsUpdate)
@@ -192,19 +196,52 @@ describe('the catalog list and skill preview', () => {
     await waitFor(() => expect(document.querySelector('[data-slot="skills-detail"]')?.className).toContain('hidden'))
   })
 
+  it('shows a recoverable error when the team skills catalog fails', async () => {
+    const teamSkill = openMercatoSkill('team-review')
+    serve({ skills: [...SKILLS, teamSkill], importableFailure: true })
+    renderAt('/skills')
+    await waitFor(() => expect(rowNames()).toContain('team-review'))
+
+    const alert = await screen.findByRole('alert', {}, { timeout: 3_000 })
+    expect(alert.textContent).toContain('Could not load the Open Mercato skills catalog.')
+    expect(rowNames()).toContain('team-review')
+    const row = document.querySelector('[data-slot="skill-row"][data-skill="team-review"]')!
+    const toggle = row.parentElement?.querySelector<HTMLButtonElement>('[data-slot="skill-activation"]')
+    expect(toggle?.hasAttribute('data-disabled')).toBe(true)
+
+    const attempts = requests.filter((request) => request.url.includes('/api/v1/skills/importable')).length
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => {
+      expect(requests.filter((request) => request.url.includes('/api/v1/skills/importable')).length).toBeGreaterThan(
+        attempts,
+      )
+    })
+  })
+
+  it('shows the Open Mercato skills update status when no skills are tracked', async () => {
+    serve()
+    renderAt('/p/boot/skills')
+
+    expect(await screen.findByText('No installed Open Mercato skills are tracked for updates.')).toBeTruthy()
+  })
+
   it('puts team-skill activation in the catalog row without making the name toggle', async () => {
     const importedSkill = openMercatoSkill('team-review')
     serve({ skills: [...SKILLS, importedSkill], importable: [importedSkill] })
     renderAt('/skills')
-    await waitFor(() => expect(document.querySelector('[data-slot="skill-activation"]')).not.toBeNull())
-    const toggle = document.querySelector<HTMLElement>('[data-slot="skill-activation"]')!
+    await waitFor(() => {
+      const row = document.querySelector('[data-slot="skill-row"][data-skill="team-review"]')
+      expect(row).not.toBeNull()
+      expect(row?.parentElement?.querySelector('[data-slot="skill-activation"]')).not.toBeNull()
+    })
+    const row = document.querySelector('[data-slot="skill-row"][data-skill="team-review"]')!
+    const toggle = row.parentElement?.querySelector<HTMLElement>('[data-slot="skill-activation"]')!
     expect(toggle.getAttribute('data-state')).toBe('checked')
     fireEvent.click(toggle)
     await waitFor(() =>
       expect(requests.filter((request) => request.method === 'PUT' && request.url === '/api/v1/workspace/ui-state').at(-1)?.body)
         .toMatchObject({ importedSkills: [] }),
     )
-    const row = document.querySelector('[data-slot="skill-row"][data-skill="team-review"]')!
     await waitFor(() => expect(row.getAttribute('data-enabled')).toBe('false'))
     fireEvent.click(row)
     await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('team-review'))
@@ -213,10 +250,9 @@ describe('the catalog list and skill preview', () => {
     expect(detailToggle?.getAttribute('data-state')).toBe('unchecked')
     const sourceTag = detail()?.querySelector<HTMLElement>('[data-slot="skill-source"]')
     expect(sourceTag?.getAttribute('title')).toBeNull()
-    fireEvent.pointerEnter(sourceTag!, { pointerType: 'mouse' })
-    expect(
-      await screen.findByText('Shared from open-mercato/skills, a team skills repository configured for this project.'),
-    ).toBeTruthy()
+    expect(sourceTag?.getAttribute('aria-label')).toBe(
+      'Shared from open-mercato/skills, a team skills repository configured for this project.',
+    )
     expect(detail()?.querySelector('[data-slot="skill-body"]')?.textContent).toContain('Body of team-review.')
     expect(detail()?.querySelector('[data-slot="skill-run-from-github"]')).toBeNull()
     fireEvent.click(detailToggle!)
@@ -291,7 +327,9 @@ describe('the catalog list and skill preview', () => {
     const second = openMercatoSkill('team-second')
     serve({ skills: [...SKILLS, first, second], importable: [first, second] })
     const client = renderAt('/skills')
-    await waitFor(() => expect(document.querySelectorAll('[data-slot="skill-activation"]')).toHaveLength(2))
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-slot="skill-activation"][aria-label^="Disable team-"]')).toHaveLength(2),
+    )
 
     const fetchMock = vi.mocked(fetch)
     const fetchNormally = fetchMock.getMockImplementation()!
