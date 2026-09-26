@@ -2020,10 +2020,10 @@ export async function deleteWorkflow(name: string): Promise<DeleteWorkflowRespon
 // ---- prefs ---------------------------------------------------------------------------------
 
 /** Merges server-side (the stored object spread under the patch) and answers the merged state. */
-export async function putUiState(patch: UiState): Promise<UiState> {
+export async function putUiState(patch: UiState, projectId = queryScope()): Promise<UiState> {
   return unwrap(
     await cez.api.v1.p[':projectId']['ui-state'].$put({
-      param: { projectId: queryScope() },
+      param: { projectId },
       json: patch,
     }),
     '/ui-state',

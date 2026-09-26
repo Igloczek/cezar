@@ -108,6 +108,7 @@ function SkillsCatalog() {
   const latestWrite = useRef(0)
   const toggleImportedSkill = useCallback((name: string) => {
     const key = queryKeys.uiState
+    const skillsKey = queryKeys.skills
     const current = queryClient.getQueryData<UiState>(key)
     const previous = effectiveImported(current, allImportableNames)
     const next = previous.includes(name) ? previous.filter((entry) => entry !== name) : [...previous, name]
@@ -116,17 +117,17 @@ function SkillsCatalog() {
     const sequence = ++latestWrite.current
     writeChain.current = writeChain.current.then(async () => {
       try {
-        const merged = await putUiState({ importedSkills: next })
+        const merged = await putUiState({ importedSkills: next }, projectId)
         if (sequence !== latestWrite.current) return
         queryClient.setQueryData(key, merged)
-        void queryClient.invalidateQueries({ queryKey: queryKeys.skills })
+        void queryClient.invalidateQueries({ queryKey: skillsKey })
       } catch (error: unknown) {
         if (sequence !== latestWrite.current) return
         toast(error instanceof Error ? error.message : String(error), { tone: 'danger' })
         void queryClient.invalidateQueries({ queryKey: key })
       }
     })
-  }, [allImportableNames, queryClient])
+  }, [allImportableNames, projectId, queryClient])
 
   const refresh = useMutation({
     mutationFn: () => refreshSkills(),

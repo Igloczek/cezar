@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useNavigate } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { queryKeys, workspaceQueryKeys } from '@/api/queries'
@@ -157,10 +157,20 @@ function gateSeededClient() {
   return client
 }
 
-function renderAt(entry: string, client = gateSeededClient()) {
+function renderAt(
+  entry: string,
+  client = gateSeededClient(),
+  onNavigate?: (navigate: ReturnType<typeof useNavigate>) => void,
+) {
+  function CaptureNavigate() {
+    const navigate = useNavigate()
+    onNavigate?.(navigate)
+    return null
+  }
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[entry]}>
+        {onNavigate && <CaptureNavigate />}
         <AppRoutes />
         <Toaster />
       </MemoryRouter>
@@ -253,7 +263,7 @@ describe('the catalog list and skill preview', () => {
     expect(
       requests.find((request) => request.method === 'PUT' && Array.isArray((request.body as { importedSkills?: unknown })?.importedSkills))
         ?.url,
-    ).toBe('/api/v1/ui-state')
+    ).toBe('/api/v1/p/boot/ui-state')
     await waitFor(() => expect(row.getAttribute('data-enabled')).toBe('false'))
     fireEvent.click(row)
     await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('team-review'))
@@ -400,6 +410,59 @@ describe('the catalog list and skill preview', () => {
     await waitFor(() =>
       expect((client.getQueryData(queryKeys.uiState) as { importedSkills?: string[] })?.importedSkills).toEqual([]),
     )
+  })
+
+  it('keeps queued skill writes scoped to the project where the toggles happened', async () => {
+    const first = openMercatoSkill('team-first')
+    const second = openMercatoSkill('team-second')
+    serve({ skills: [...SKILLS, first, second], importable: [first, second] })
+    const client = gateSeededClient()
+    client.setQueryData(workspaceQueryKeys.projects, {
+      projects: [
+        {
+          id: 'other',
+          name: 'other',
+          root: '/other',
+          addedAt: '2026-09-24T12:00:00.000Z',
+          lastOpenedAt: '2026-09-24T12:00:00.000Z',
+          source: 'local',
+          status: 'ok',
+        },
+      ],
+      bootProject: 'boot',
+      projectsDir: '~/cezar/projects',
+    })
+    let navigate!: ReturnType<typeof useNavigate>
+    renderAt('/p/boot/skills', client, (value) => {
+      navigate = value
+    })
+    await waitFor(() =>
+      expect(document.querySelectorAll('[data-slot="skill-activation"][aria-label^="Disable team-"]')).toHaveLength(2),
+    )
+
+    const fetchMock = vi.mocked(fetch)
+    const fetchNormally = fetchMock.getMockImplementation()!
+    const writes: Array<{ url: string; body: unknown; resolve: (response: Response) => void }> = []
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input).endsWith('/ui-state') && init?.method === 'PUT') {
+        return new Promise<Response>((resolve) =>
+          writes.push({ url: String(input), body: JSON.parse(String(init.body)), resolve }),
+        )
+      }
+      return fetchNormally(input, init)
+    })
+
+    fireEvent.click(document.querySelector('[data-slot="skill-activation"][aria-label="Disable team-first"]')!)
+    await waitFor(() => expect(writes).toHaveLength(1))
+    fireEvent.click(document.querySelector('[data-slot="skill-activation"][aria-label="Disable team-second"]')!)
+    await act(async () => navigate('/p/other/skills'))
+    const response = (payload: unknown) =>
+      new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+    await act(async () => writes[0]?.resolve(response({ importedSkills: ['team-second'] })))
+    await waitFor(() => expect(writes).toHaveLength(2))
+    expect(writes.map(({ url }) => url)).toEqual(['/api/v1/p/boot/ui-state', '/api/v1/p/boot/ui-state'])
+    expect(writes[1]?.body).toEqual({ importedSkills: [] })
+    await act(async () => writes[1]?.resolve(response({ importedSkills: [] })))
   })
 
   it('filters the skills list without adding a separate GitHub launcher view', async () => {
