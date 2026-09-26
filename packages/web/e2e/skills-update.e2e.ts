@@ -107,7 +107,7 @@ describe('automatic Open Mercato skills updates', () => {
     browser.goto(`${baseUrl}/p/${projectId}/skills?skill=__import`)
     browser.waitForFunction(`document.querySelector('[data-slot="skills-update-card"]') !== null`)
     expect(browser.text('[data-slot="skills-update-card"]')).toContain(
-      'Installed Open Mercato skills are up to date.',
+      'Skill files were updated.',
     )
     expect(browser.text('[data-slot="skills-upgrade-notes"]')).toContain('/om-apply-upgrade-notes')
     browser.screenshot(`${artifactsDir}/skills-update-success.png`)

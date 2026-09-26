@@ -644,6 +644,14 @@ describe('legacy flat URLs redirect to the boot project', () => {
     expect(routeName()).toBe('skills')
   })
 
+  it('keeps the old bookmarklet pseudo-skill deep link on the project bookmarklets page', () => {
+    renderAt('/settings/skills?skill=__bm#saved')
+    expect(currentPathname()).toBe(`/p/${BOOT}/settings/bookmarklets`)
+    expect(currentSearch()).toBe('')
+    expect(currentHash()).toBe('#saved')
+    expect(routeName()).toBe('settings-bookmarklets')
+  })
+
   it('delivers the full bookmarklet grammar into the composer (spec 011 contract)', () => {
     renderAt('/new?skill=om-code-review&ref=https%3A%2F%2Fgithub.com%2Fo%2Fr%2Fpull%2F1&auto=1&key=s3cret')
     expect(currentPathname()).toBe(`/p/${BOOT}/new`)
