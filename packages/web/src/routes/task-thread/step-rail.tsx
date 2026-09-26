@@ -1,7 +1,7 @@
 import { ChevronDownIcon, CircleCheckIcon, CircleIcon, CircleXIcon, LoaderCircleIcon } from 'lucide-react'
 import { useState } from 'react'
 
-import type { StepState, StepStatus } from '@open-mercato/cezar-api-client'
+import type { GraphExecution, StepState, StepStatus } from '@open-mercato/cezar-api-client'
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
 
@@ -147,7 +147,7 @@ const openByRun = new Map<string, boolean>()
  * Collapsed by default because the summary already answers "where is this run?" at a glance;
  * an explicit expand is remembered for that run across tab switches.
  */
-export function WorkflowSteps({ runId, steps }: { runId: string; steps: StepState[] }) {
+export function WorkflowSteps({ runId, steps, graphExecution }: { runId: string; steps: StepState[]; graphExecution?: GraphExecution }) {
   const [open, setOpen] = useState(() => openByRun.get(runId) ?? false)
   if (steps.length === 0) return null
   const toggle = (next: boolean) => {
@@ -183,6 +183,19 @@ export function WorkflowSteps({ runId, steps }: { runId: string; steps: StepStat
       <CollapsibleContent>
         <div className="pt-2">
           <StepRail steps={steps} />
+          {graphExecution?.visits.length ? (
+            <ol aria-label="Graph node visits" className="mt-3 space-y-2 border-t border-border pt-3">
+              {graphExecution.visits.map((visit) => (
+                <li key={visit.visitId} data-graph-visit={visit.nodeId} className="rounded-md bg-muted/40 px-3 py-2 text-xs">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-mono font-medium">{visit.nodeId}</span>
+                    <span className="text-muted-foreground">visit {visit.visitId.replace(/^visit-/, '')} · {visit.status}</span>
+                  </div>
+                  {visit.report ? <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{visit.report}</p> : null}
+                </li>
+              ))}
+            </ol>
+          ) : null}
         </div>
       </CollapsibleContent>
     </Collapsible>

@@ -106,6 +106,7 @@ import { UiEventSink } from '../runs/ui-event-sink.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import { chainStepNote, DEFAULT_ALLOWED_TOOLS, stepKind, type WorkflowDef, type WorkflowStepDef } from './types.ts';
 import { freshContinuationContext } from './continuation-context.ts';
+import { graphRoutesForResult, graphVisitId } from './graph-runtime.ts';
 
 const CHECK_OUTPUT_CAP = 20_000;
 
@@ -136,6 +137,15 @@ const DONE_MARKER_RE = /CEZ:DONE\s*$/;
  * backends can't split the marker across text events.
  */
 const MONITORING_MARKER_RE = /CEZ:MONITORING\s*$/;
+const GRAPH_RESULT_MARKER_RE = /(?:^|\n)CEZ:RESULT=([A-Za-z0-9._-]+)\s*$/;
+
+function graphResultFromTurn(text: string): string | undefined {
+  return GRAPH_RESULT_MARKER_RE.exec(text)?.[1];
+}
+
+function stripGraphResultMarker(text: string): string {
+  return text.replace(/(?:^|\n)CEZ:RESULT=[A-Za-z0-9._-]+[ \t]*(?=\n|$)/g, '');
+}
 /**
  * Trailing task-reference marker lines — `CEZ:PR=` / `CEZ:ISSUE=` / `CEZ:TITLE=`
  * (spec 2026-07-18-task-ref-markers), whole lines, at the very end of the turn.
@@ -308,6 +318,13 @@ interface ActiveRun {
   /** Live claude session of the currently running agent step, if any. */
   session?: AgentSession;
   currentStepId?: string;
+  currentGraphVisitId?: string;
+  currentGraphResult?: string;
+  currentGraphReport?: string;
+  /** One graph visit owns this state while several visits run within one parent task. */
+  graphWorker?: boolean;
+  graphConsumesSlot?: boolean;
+  graphParent?: ActiveRun;
   idleTimer?: NodeJS.Timeout;
   monitoringWakeTimer?: NodeJS.Timeout;
   monitoringWakeIntervalMinutes?: number;
@@ -874,6 +891,9 @@ interface PersistedAttachments {
  */
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
+  private readonly graphWorkers = new Map<string, Map<string, ActiveRun>>();
+  /** Additional workspace slots held by graph sessions beyond each parent run's base slot. */
+  private readonly graphExtraSlots = new Map<string, number>();
   // Queue + `starting` set (spec 006, janitor's pump() pattern): `starting`
   // covers the window between shifting a run off the queue and the run
   // registering in `active`, so parallel-slot counting is never racy.
@@ -1208,6 +1228,9 @@ export class RunManager {
     // Persist the full definition so a queued run survives a restart (#367) —
     // ad-hoc "(planned)" chains exist nowhere else to re-resolve from.
     this.store.updateRun(run.id, { workflowDef: workflow });
+    if (workflow.graph) this.store.updateRun(run.id, {
+      graphExecution: { visits: [], pendingActivations: [], routingDecisions: [], activeSessions: [], joinProgress: [] },
+    });
     // The run's place in a dispatch tree (spec 2026-09-10-dispatch), written the way
     // automation provenance is (`automations/task-template.ts`): an update straight after create,
     // rather than a tenth key on `createRun`'s parameter object. Persisting it here — not merely
@@ -1286,7 +1309,34 @@ export class RunManager {
     for (const runId of this.unitParents) if (this.monitoring.has(runId)) spawnParked += 1;
     const watchers = this.monitoring.size - spawnParked;
     const exemptMonitoring = Math.min(watchers, this.semaphore.maxMonitoringSessions());
-    return this.active.size + this.starting.size - ordinaryWaiting - exemptMonitoring - spawnParked;
+    const graphExtraSlots = [...this.graphExtraSlots.values()].reduce((sum, count) => sum + count, 0);
+    return this.active.size + this.starting.size + graphExtraSlots - ordinaryWaiting - exemptMonitoring - spawnParked;
+  }
+
+  private registerGraphWorker(runId: string, visitId: string, state: ActiveRun): void {
+    const workers = this.graphWorkers.get(runId) ?? new Map<string, ActiveRun>();
+    workers.set(visitId, state);
+    this.graphWorkers.set(runId, workers);
+    const agentWorkers = [...workers.values()].filter((worker) => worker.graphConsumesSlot).length;
+    this.graphExtraSlots.set(runId, Math.max(0, agentWorkers - 1));
+    const root = this.active.get(runId);
+    if (root) root.interrupt = () => {
+      for (const worker of this.graphWorkers.get(runId)?.values() ?? []) worker.interrupt();
+    };
+  }
+
+  private unregisterGraphWorker(runId: string, visitId: string): void {
+    const workers = this.graphWorkers.get(runId);
+    workers?.delete(visitId);
+    if (!workers?.size) {
+      this.graphWorkers.delete(runId);
+      this.graphExtraSlots.delete(runId);
+      const root = this.active.get(runId);
+      if (root) root.interrupt = () => undefined;
+      return;
+    }
+    const agentWorkers = [...workers.values()].filter((worker) => worker.graphConsumesSlot).length;
+    this.graphExtraSlots.set(runId, Math.max(0, agentWorkers - 1));
   }
 
   /**
@@ -1586,6 +1636,42 @@ export class RunManager {
     // per-run directory here — bounded to `<dataDir>/tmp`, never a sibling.
     sweepAgentTmpDirs(this.dataDir, live.map((r) => r.id));
     for (const run of live) {
+      if (run.status === 'running' && run.workflowDef?.graph && run.graphExecution) {
+        const execution = run.graphExecution;
+        const interrupted = execution.visits.filter((visit) => visit.status === 'running');
+        const resumedVisits = interrupted.map((visit) => ({
+          visitId: visit.visitId,
+          nodeId: visit.nodeId,
+          status: 'pending' as const,
+          lineage: visit.lineage ?? [],
+        }));
+        const pendingActivations = [
+          ...resumedVisits.map((visit) => ({ nodeId: visit.nodeId, lineage: visit.lineage, resumeVisitId: visit.visitId })),
+          ...(execution.pendingActivations ?? []),
+        ];
+        for (const visit of interrupted) {
+          const step = run.steps.find((candidate) => candidate.id === visit.nodeId);
+          if (step && (step.status === 'running' || step.status === 'waiting')) {
+            this.store.updateStep(run.id, step.id, { status: 'pending' });
+          }
+        }
+        this.store.updateRun(run.id, {
+          status: 'queued', startedAt: undefined, currentStepId: undefined,
+          graphExecution: {
+            ...execution,
+            visits: execution.visits.map((visit) => visit.status === 'running'
+              ? { ...visit, status: 'pending' as const }
+              : visit),
+            pendingActivations,
+            // The backend-owned ids stay attached to their visit; start-up will resume these
+            // sessions rather than minting another session for an interrupted activation.
+            activeSessions: execution.activeSessions,
+          },
+        });
+        const recovered = this.store.getRun(run.id);
+        if (recovered) await this.reviveQueuedRun(recovered, 'cezar restarted — resuming graph scheduling');
+        continue;
+      }
       if (run.status === 'queued') {
         await this.reviveQueuedRun(run, 'cezar restarted');
         continue;
@@ -3077,7 +3163,12 @@ export class RunManager {
   /** Shared live-session delivery. Synthetic scheduler prompts reuse lifecycle
    * bookkeeping without masquerading as user-authored transcript messages. */
   private deliverMessage(runId: string, content: PastedContent[], userAuthored: boolean): boolean {
-    const state = this.active.get(runId);
+    let state = this.active.get(runId);
+    if (!state?.session?.open) {
+      const askingWorker = [...(this.graphWorkers.get(runId)?.values() ?? [])]
+        .find((worker) => worker.askPark === 'waiting' && worker.session?.open);
+      if (askingWorker) state = askingWorker;
+    }
     if (!state?.session?.open || state.cancelled) return false;
     // A parked in-place run gave the working-tree lease back (`parkRepoRoot`). It must own the
     // tree again before its session resumes, and the lease is asynchronous — so the message is
@@ -3138,15 +3229,27 @@ export class RunManager {
       this.clearPendingAsk(runId);
       this.clearIdleTimer(state);
       this.clearMonitoringWakeTimer(state, runId);
-      this.waiting.delete(runId); // resumed — the run counts against slots again
+      this.updateGraphVisitStatus(runId, state.currentGraphVisitId, 'running');
       this.leaveMonitoring(runId);
       // The answer landed, so a mid-workflow ask park (#917) is over and the
       // workflow may advance past this step again. The durable twin
       // (`RunRecord.askParked`) is retired by the status write below.
       state.askPark = undefined;
+      let anotherAskIsWaiting = false;
+      if (state.graphWorker && state.graphParent) {
+        anotherAskIsWaiting = [...(this.graphWorkers.get(runId)?.values() ?? [])]
+          .some((worker) => worker !== state && worker.askPark === 'waiting');
+        state.graphParent.askPark = anotherAskIsWaiting ? 'waiting' : undefined;
+      }
+      if (anotherAskIsWaiting) this.waiting.add(runId);
+      else this.waiting.delete(runId); // resumed — the run counts against slots again
       // Clear any `monitoring` activity — the agent is actively working again
       // (spec 2026-07-18-subagent-monitoring-status, #490).
-      this.store.updateRun(runId, { status: 'running', activity: undefined });
+      this.store.updateRun(runId, {
+        status: anotherAskIsWaiting ? 'waiting' : 'running',
+        activity: undefined,
+        askParked: anotherAskIsWaiting ? true : undefined,
+      });
       if (state.currentStepId) {
         this.store.updateStep(runId, state.currentStepId, { status: 'running' });
       }
@@ -3452,7 +3555,7 @@ export class RunManager {
     let stepCost = 0;
     let turnText = '';
     let sessionError: string | undefined;
-    const sink = this.makeUiSink(runId, stepId);
+    const sink = this.makeUiSink(runId, stepId, state.currentGraphVisitId ? stepId : undefined);
     const onEvent = (event: AgentEvent) => {
       if (event.type === 'image') {
         const saved = this.persistAttachment(runId, event.mediaType, event.data);
@@ -3465,7 +3568,7 @@ export class RunManager {
         // `CEZ:TITLE=` lines, so running it first lets the two trailing-marker strippers see a
         // `CEZ:MONITORING` / `CEZ:DONE` that an agent put ABOVE its task references. Outside-in
         // they saw those references and left the protocol marker in the transcript.
-        const text = stripAskMarker(stripMonitoringMarker(stripDoneMarker(stripTaskMarkers(event.text))));
+        const text = stripAskMarker(stripMonitoringMarker(stripDoneMarker(stripTaskMarkers(stripGraphResultMarker(event.text)))));
         if (text) this.store.appendEvent(runId, { type: 'text', text, stepId });
         return;
       }
@@ -3967,6 +4070,13 @@ export class RunManager {
 
     const lastAgentIdx = findLastAgentStepIndex(workflow);
 
+    if (workflow.graph) {
+      runError = await this.runGraphWorkflow(
+        runId, state, workflow, input, skills, emit, startImages, taskBackend, extraSystemPrompt, startAttachments,
+      );
+      startImages = undefined;
+      startAttachments = [];
+    } else {
     let i = 0;
     while (i < workflow.steps.length) {
       if (state.cancelled) break;
@@ -4060,6 +4170,7 @@ export class RunManager {
       runError = `check "${step.id}" failed${step.onFail ? ` after ${used + 1} attempts` : ''}`;
       break;
     }
+    }
 
     // How a mid-workflow ask park (#917) ended, read once before the settlement
     // below clears it. A LIVE park never reaches this line: the parked session
@@ -4119,6 +4230,386 @@ export class RunManager {
     this.dropActive(runId);
   }
 
+  /** Execute one graph in this run. Visits and route decisions are additive persisted run data. */
+  private async runGraphWorkflow(
+    runId: string,
+    state: ActiveRun,
+    workflow: WorkflowDef,
+    input: StartRunInput,
+    skills: Skill[],
+    emit: (event: { type: string; stepId?: string; [k: string]: unknown }) => void,
+    images: ContentBlock[] | undefined,
+    taskBackend: RunnerId,
+    extraSystemPrompt: string | undefined,
+    attachments: PersistedAttachment[],
+  ): Promise<string | null> {
+    const graph = workflow.graph;
+    if (!graph) return null;
+    type JoinLineage = { forkId: string; branchId: string; joinId: string };
+    type GraphWork = { nodeId: string; lineage: JoinLineage[]; resumeVisitId?: string };
+    const persisted = this.store.getRun(runId)?.graphExecution;
+    const queue: GraphWork[] = persisted?.pendingActivations?.length
+      ? [...persisted.pendingActivations]
+      : persisted?.visits.length
+        ? []
+        : [{ nodeId: graph.entry, lineage: [] }];
+    const joinGroups = new Map<string, { expected: number; branches: Set<string> }>();
+    const pendingJoins = new Map<string, GraphWork>();
+    for (const progress of persisted?.joinProgress ?? []) {
+      joinGroups.set(`${progress.visitId}:${progress.nodeId}`, {
+        expected: progress.expected,
+        branches: new Set(progress.arrivedBranches ?? []),
+      });
+    }
+    for (const waiter of persisted?.joinWaiters ?? []) {
+      for (const item of waiter.lineage.filter((entry) => entry.joinId === waiter.nodeId)) {
+        pendingJoins.set(`${item.forkId}:${item.joinId}`, waiter);
+      }
+    }
+    for (const [key, waiter] of pendingJoins) {
+      const group = joinGroups.get(key);
+      if (group && group.expected <= group.branches.size && !queue.some((item) => item.nodeId === waiter.nodeId && item.lineage.some((lineage) => lineage.joinId === waiter.nodeId && `${lineage.forkId}:${lineage.joinId}` === key))) {
+        queue.push(waiter);
+      }
+    }
+    const reaches = (from: string, to: string): boolean => {
+      const pending = [from];
+      const seen = new Set<string>();
+      while (pending.length) {
+        const id = pending.shift()!;
+        if (id === to) return true;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        pending.push(...graph.edges.filter((edge) => edge.from === id).map((edge) => edge.to));
+      }
+      return false;
+    };
+    let visitNumber = this.store.getRun(runId)?.graphExecution?.visits.length ?? 0;
+    let graphFailure: string | null = null;
+    const processGraphWork = async (work: GraphWork): Promise<string | null> => {
+      const nodeId = work.nodeId;
+      const node = graph.nodes.find((candidate) => candidate.id === nodeId);
+      const step = workflow.steps.find((candidate) => candidate.id === nodeId);
+      if (!node || !step) return `graph references missing node "${nodeId}"`;
+      let lineage = work.lineage;
+      if (node.join === 'all') {
+        let waiting = false;
+        for (const item of lineage.filter((entry) => entry.joinId === nodeId)) {
+          const key = `${item.forkId}:${item.joinId}`;
+          const group = joinGroups.get(key) ?? { expected: 0, branches: new Set<string>() };
+          group.branches.add(item.branchId);
+          joinGroups.set(key, group);
+          const expected = Math.max(group.expected, group.branches.size);
+          const execution = this.store.getRun(runId)?.graphExecution;
+          this.store.updateRun(runId, { graphExecution: {
+            ...(execution ?? { visits: [], routingDecisions: [], activeSessions: [], joinProgress: [] }),
+            joinProgress: [
+              ...(execution?.joinProgress.filter((entry) => !(entry.nodeId === nodeId && entry.visitId === item.forkId)) ?? []),
+              { nodeId, visitId: item.forkId, expected, arrived: group.branches.size, arrivedBranches: [...group.branches] },
+            ],
+            joinWaiters: group.expected > group.branches.size
+              ? [...(execution?.joinWaiters?.filter((entry) => !(entry.nodeId === nodeId && entry.lineage.some((lineage) => lineage.forkId === item.forkId && lineage.joinId === nodeId))) ?? []), work]
+              : execution?.joinWaiters?.filter((entry) => !(entry.nodeId === nodeId && entry.lineage.some((lineage) => lineage.forkId === item.forkId && lineage.joinId === nodeId))),
+          } });
+          if (group.expected > group.branches.size) {
+            waiting = true;
+            pendingJoins.set(key, work);
+          }
+        }
+        if (waiting) return null;
+        const completedGroups = new Set(lineage.filter((entry) => entry.joinId === nodeId).map((entry) => entry.forkId));
+        for (const forkId of completedGroups) pendingJoins.delete(`${forkId}:${nodeId}`);
+        const completedWaiterKeys = new Set([...completedGroups].map((forkId) => `${forkId}:${nodeId}`));
+        const currentExecution = this.store.getRun(runId)?.graphExecution;
+        if (currentExecution) this.store.updateRun(runId, {
+          graphExecution: {
+            ...currentExecution,
+            joinWaiters: currentExecution.joinWaiters?.filter((waiter) => !waiter.lineage.some((item) => completedWaiterKeys.has(`${item.forkId}:${item.joinId}`))),
+          },
+        });
+        for (let index = queue.length - 1; index >= 0; index--) {
+          const queued = queue[index]!;
+          if (queued.nodeId === nodeId && queued.lineage.some((entry) => entry.joinId === nodeId && completedGroups.has(entry.forkId))) queue.splice(index, 1);
+        }
+        lineage = lineage.filter((entry) => entry.joinId !== nodeId || !completedGroups.has(entry.forkId));
+      }
+      const visitId = work.resumeVisitId ?? graphVisitId(++visitNumber);
+      const current = this.store.getRun(runId)?.graphExecution ?? { visits: [], routingDecisions: [], activeSessions: [], joinProgress: [] };
+      const visit = { visitId, nodeId, status: 'running' as const, startedAt: new Date().toISOString(), lineage };
+      this.store.updateRun(runId, {
+        graphExecution: {
+          ...current,
+          pendingActivations: queue,
+          visits: work.resumeVisitId
+            ? current.visits.map((existing) => existing.visitId === visitId ? visit : existing)
+            : [...current.visits, visit],
+        },
+        currentStepId: nodeId,
+      });
+      const record = this.store.getRun(runId)?.steps.find((entry) => entry.id === nodeId);
+      this.store.updateStep(runId, nodeId, {
+        status: 'running', iterations: (record?.iterations ?? 0) + 1,
+        startedAt: new Date().toISOString(), error: undefined,
+      });
+      emit({ type: 'graph-node-start', nodeId, visitId, stepId: nodeId, name: node.name ?? node.id, kind: node.kind });
+      const emitNode = (event: { type: string; stepId?: string; [key: string]: unknown }) =>
+        emit({ ...event, nodeId, visitId });
+
+      let outcome: string;
+      let report: string | undefined;
+      let activationState = state;
+      if (node.kind === 'agent') {
+        const terminalAgent = graph.terminals.includes(nodeId);
+        const nodeState: ActiveRun = {
+          ...state,
+          session: undefined,
+          currentStepId: nodeId,
+          currentGraphVisitId: visitId,
+          currentGraphResult: undefined,
+          currentGraphReport: undefined,
+          graphWorker: true,
+          graphParent: state,
+          interrupt: () => undefined,
+        };
+        activationState = nodeState;
+        Object.defineProperty(nodeState, 'cancelled', { enumerable: true, get: () => state.cancelled });
+        this.registerGraphWorker(runId, visitId, nodeState);
+        const nodeImages = images;
+        images = undefined;
+        const nodeAttachments = attachments;
+        attachments = [];
+        let failure: string | null;
+        try {
+          failure = await this.runAgentStep(
+            runId, nodeState, step, input, skills, null, terminalAgent, emitNode, nodeImages, taskBackend,
+            extraSystemPrompt, undefined, nodeAttachments,
+          );
+        } finally {
+          this.unregisterGraphWorker(runId, visitId);
+        }
+        if (graphFailure) {
+          this.store.updateStep(runId, nodeId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+          this.finishGraphVisit(runId, visitId, nodeId, 'cancelled');
+          emitNode({ type: 'graph-node-cancelled', stepId: nodeId });
+          return null;
+        }
+        if (failure) {
+          this.finishStep(runId, nodeId, 'failed', failure, emitNode);
+          this.finishGraphVisit(runId, visitId, nodeId, 'failed', failure);
+          return `graph node "${nodeId}" failed: ${failure}`;
+        }
+        if (nodeState.askPark) {
+          nodeState.currentGraphVisitId = undefined;
+          return null;
+        }
+        outcome = nodeState.currentGraphResult ?? '';
+        report = nodeState.currentGraphReport;
+      } else {
+        const checkState: ActiveRun = {
+          ...state,
+          session: undefined,
+          currentStepId: nodeId,
+          currentGraphVisitId: visitId,
+          graphWorker: true,
+          graphConsumesSlot: false,
+          graphParent: state,
+          interrupt: () => undefined,
+        };
+        Object.defineProperty(checkState, 'cancelled', { enumerable: true, get: () => state.cancelled });
+        this.registerGraphWorker(runId, visitId, checkState);
+        let checked: { ok: boolean; output: string; executionError?: string };
+        try {
+          checked = await this.runCheckStep(checkState, step, emitNode);
+        } finally {
+          this.unregisterGraphWorker(runId, visitId);
+        }
+        if (graphFailure) {
+          this.store.updateStep(runId, nodeId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+          this.finishGraphVisit(runId, visitId, nodeId, 'cancelled');
+          emitNode({ type: 'graph-node-cancelled', stepId: nodeId });
+          return null;
+        }
+        if (state.cancelled) return null;
+        if (checked.executionError) {
+          this.finishStep(runId, nodeId, 'failed', checked.executionError, emitNode);
+          this.finishGraphVisit(runId, visitId, nodeId, 'failed', checked.executionError);
+          return `graph check node "${nodeId}" could not execute: ${checked.executionError}`;
+        }
+        report = checked.output;
+        outcome = checked.ok ? 'passed' : 'failed';
+      }
+
+      this.finishStep(runId, nodeId, 'done', undefined, emitNode);
+      this.finishGraphVisit(runId, visitId, nodeId, 'done', report, outcome || undefined);
+      activationState.currentGraphVisitId = undefined;
+      activationState.currentGraphResult = undefined;
+      activationState.currentGraphReport = undefined;
+      let routes;
+      try {
+        routes = graphRoutesForResult(graph, nodeId, outcome || undefined);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        this.finishStep(runId, nodeId, 'failed', message, emitNode);
+        this.finishGraphVisit(runId, visitId, nodeId, 'failed', message, outcome || undefined);
+        return message;
+      }
+      const updated = this.store.getRun(runId)?.graphExecution ?? current;
+      this.store.updateRun(runId, {
+        graphExecution: {
+          ...updated,
+          routingDecisions: [...updated.routingDecisions, ...routes.map((route) => ({ visitId, ...route }))],
+        },
+      });
+      emit({ type: 'graph-routing', nodeId, visitId, result: outcome || undefined, routes });
+      const inherited = lineage.filter((item) => routes.some((route) => reaches(route.to, item.joinId)));
+      const changedJoinExpected = new Map<string, number>();
+      const releasedJoinWaiters = new Set<string>();
+      for (const dropped of lineage.filter((item) => !inherited.includes(item))) {
+        const key = `${dropped.forkId}:${dropped.joinId}`;
+        const group = joinGroups.get(key);
+        if (group) {
+          group.expected = Math.max(group.branches.size, group.expected - 1);
+          changedJoinExpected.set(key, group.expected);
+          const deferred = pendingJoins.get(key);
+          if (deferred && group.expected <= group.branches.size) {
+            pendingJoins.delete(key);
+            releasedJoinWaiters.add(key);
+            queue.push(deferred);
+          }
+        }
+      }
+      const newForks = routes.length > 1 ? graph.nodes.filter((candidate) => candidate.join === 'all').flatMap((join) => {
+        const targets = routes.map((route, index) => ({ route, index })).filter(({ route }) => reaches(route.to, join.id));
+        return targets.length > 1 ? [{ joinId: join.id, targets }] : [];
+      }) : [];
+      for (const fork of newForks) {
+        joinGroups.set(`${visitId}:${fork.joinId}`, { expected: fork.targets.length, branches: new Set() });
+        const execution = this.store.getRun(runId)?.graphExecution;
+        if (execution) this.store.updateRun(runId, {
+          graphExecution: {
+            ...execution,
+            joinProgress: [
+              ...execution.joinProgress.filter((entry) => !(entry.nodeId === fork.joinId && entry.visitId === visitId)),
+              { nodeId: fork.joinId, visitId, expected: fork.targets.length, arrived: 0, arrivedBranches: [] },
+            ],
+          },
+        });
+      }
+      queue.push(...routes.map((route, index) => ({
+        nodeId: route.to,
+        lineage: [
+          ...inherited,
+          ...newForks.filter((fork) => fork.targets.some((target) => target.index === index)).map((fork) => ({
+            forkId: visitId, branchId: `${visitId}:${index}`, joinId: fork.joinId,
+          })),
+        ],
+      })));
+      const afterRoute = this.store.getRun(runId)?.graphExecution;
+      if (afterRoute) this.store.updateRun(runId, {
+        graphExecution: {
+          ...afterRoute,
+          pendingActivations: queue,
+          joinProgress: afterRoute.joinProgress.map((progress) => {
+            const key = `${progress.visitId}:${progress.nodeId}`;
+            const expected = changedJoinExpected.get(key);
+            return expected === undefined ? progress : { ...progress, expected };
+          }),
+          joinWaiters: afterRoute.joinWaiters?.filter((waiter) => !waiter.lineage.some((item) => releasedJoinWaiters.has(`${item.forkId}:${item.joinId}`))),
+        },
+      });
+      return null;
+    };
+
+    const running = new Set<Promise<void>>();
+    let runningAgents = 0;
+    const graphAgentLimit = Math.min(this.semaphore.maxParallel(), this.semaphore.projectMaxParallel(this.repoRoot));
+    while ((queue.length || running.size) && !state.cancelled && !graphFailure) {
+      let launched = false;
+      while (queue.length && running.size < graphAgentLimit && state.askPark !== 'waiting') {
+        const eligibleIndex = queue.findIndex((candidate) => {
+          const candidateNode = graph.nodes.find((item) => item.id === candidate.nodeId);
+          if (!candidateNode || candidateNode.kind === 'check' || runningAgents === 0) return true;
+          return this.semaphore.busy() < graphAgentLimit;
+        });
+        if (eligibleIndex < 0) break;
+        const [work] = queue.splice(eligibleIndex, 1);
+        if (!work) break;
+        const latestExecution = this.store.getRun(runId)?.graphExecution;
+        if (latestExecution) this.store.updateRun(runId, {
+          graphExecution: { ...latestExecution, pendingActivations: queue },
+        });
+        const agentNode = graph.nodes.find((item) => item.id === work.nodeId)?.kind === 'agent';
+        if (agentNode) runningAgents += 1;
+        let task!: Promise<void>;
+        task = (async () => {
+          let failure: string | null;
+          try {
+            failure = await processGraphWork(work);
+          } catch (err) {
+            failure = err instanceof Error ? err.message : String(err);
+          }
+          if (failure && !graphFailure) {
+            graphFailure = failure;
+            queue.length = 0;
+            for (const worker of this.graphWorkers.get(runId)?.values() ?? []) worker.interrupt();
+          }
+        })().finally(() => {
+          if (agentNode) runningAgents -= 1;
+        }).finally(() => running.delete(task));
+        running.add(task);
+        launched = true;
+      }
+      if (!running.size) break;
+      if (!launched || running.size) await Promise.race(running);
+    }
+    if (state.cancelled || graphFailure) {
+      for (const worker of this.graphWorkers.get(runId)?.values() ?? []) worker.interrupt();
+      await Promise.all([...running]);
+    }
+    if (state.cancelled) {
+      const execution = this.store.getRun(runId)?.graphExecution;
+      if (execution) this.store.updateRun(runId, { graphExecution: {
+        ...execution,
+        visits: execution.visits.map((visit) => visit.status === 'running' ? { ...visit, status: 'cancelled' as const, finishedAt: new Date().toISOString() } : visit),
+      } });
+    }
+    if (state.cancelled) return null;
+    return graphFailure;
+  }
+
+  private finishGraphVisit(
+    runId: string,
+    visitId: string,
+    nodeId: string,
+    status: 'done' | 'failed' | 'cancelled',
+    report?: string,
+    result?: string,
+  ): void {
+    const execution = this.store.getRun(runId)?.graphExecution;
+    if (!execution) return;
+    this.store.updateRun(runId, {
+      graphExecution: {
+        ...execution,
+        visits: execution.visits.map((visit) => visit.visitId === visitId
+          ? { ...visit, nodeId, status, ...(result ? { result } : {}), ...(report ? { report: report.slice(0, CHECK_OUTPUT_CAP) } : {}), finishedAt: new Date().toISOString() }
+          : visit),
+      },
+    });
+  }
+
+  /** Keep the persisted graph visit aligned with a live session's ask park. */
+  private updateGraphVisitStatus(runId: string, visitId: string | undefined, status: 'running' | 'waiting'): void {
+    if (!visitId) return;
+    const execution = this.store.getRun(runId)?.graphExecution;
+    if (!execution) return;
+    this.store.updateRun(runId, {
+      graphExecution: {
+        ...execution,
+        visits: execution.visits.map((visit) => visit.visitId === visitId ? { ...visit, status } : visit),
+      },
+    });
+  }
+
   /** Returns an error message, or null on success. */
   private async runAgentStep(
     runId: string,
@@ -4173,6 +4664,9 @@ export class RunManager {
     }
 
     let userPrompt = applyTemplate(step.prompt ?? '{{task}}', input.task);
+    if (step.results?.length) {
+      userPrompt += `\n\nReturn exactly one declared workflow result on its own final line as CEZ:RESULT=<label>. Declared results: ${step.results.join(', ')}.`;
+    }
     // A fresh run's OPENING prompt is delivered straight to `startSession`, never through
     // `deliverMessage`, so — like the continuation seam above (#811) — it needs the same
     // delivery-only `/skill` rewrite. Without it a task STARTED with `/om-...` as its first
@@ -4209,7 +4703,10 @@ export class RunManager {
       userPrompt += `\n\n${pastedAttachmentsText(attachments, this.attachmentLibraryHint(attachments))}`;
     }
 
-    const sessionId = randomUUID();
+    const persistedGraphSession = state.currentGraphVisitId
+      ? this.store.getRun(runId)?.graphExecution?.activeSessions.find((item) => item.visitId === state.currentGraphVisitId)
+      : undefined;
+    const sessionId = persistedGraphSession?.sessionId ?? randomUUID();
     const backend = step.runner ?? taskBackend;
     this.store.updateStep(runId, step.id, { sessionId, backend });
 
@@ -4218,7 +4715,7 @@ export class RunManager {
     let stepCost = stepRecord?.costUsd ?? 0;
     let turnText = '';
     let sessionError: string | undefined;
-    const sink = this.makeUiSink(runId, step.id);
+    const sink = this.makeUiSink(runId, step.id, state.currentGraphVisitId ? step.id : undefined);
     const onEvent = (event: AgentEvent) => {
       if (event.type === 'image') {
         const saved = this.persistAttachment(runId, event.mediaType, event.data);
@@ -4231,7 +4728,8 @@ export class RunManager {
         // `CEZ:TITLE=` lines, so running it first lets the two trailing-marker strippers see a
         // `CEZ:MONITORING` / `CEZ:DONE` that an agent put ABOVE its task references. Outside-in
         // they saw those references and left the protocol marker in the transcript.
-        const text = stripAskMarker(stripMonitoringMarker(stripDoneMarker(stripTaskMarkers(event.text))));
+        const visible = stripGraphResultMarker(event.text);
+        const text = stripAskMarker(stripMonitoringMarker(stripDoneMarker(stripTaskMarkers(visible))));
         if (text) emit({ type: 'text', text, stepId: step.id });
         return;
       }
@@ -4245,6 +4743,7 @@ export class RunManager {
       if (event.type === 'session') {
         // Codex/OpenCode mint their own session id — persist it so resume works.
         this.store.updateStep(runId, step.id, { sessionId: event.sessionId, backend });
+        this.recordGraphSession(runId, state, event.sessionId, backend, true);
       }
       if (event.type === 'token-usage') {
         this.store.updateStep(runId, step.id, { tokensUsed: startTokens + event.tokensUsed });
@@ -4307,6 +4806,8 @@ export class RunManager {
           !ask &&
           !dispatchTurn.overBudget &&
           (dispatchTurn.dispatched || endsWithMonitoringMarker(turnText));
+        state.currentGraphResult = graphResultFromTurn(turnText);
+        state.currentGraphReport = turnText.replace(/(?:^|\n)CEZ:RESULT=[A-Za-z0-9._-]+\s*$/, '').trim();
         turnText = '';
         for (const note of askNotes) emit({ type: 'note', stepId: step.id, ...note });
         if (done) {
@@ -4353,7 +4854,9 @@ export class RunManager {
           // Inside the `!autoContinued` branch on purpose: a nudged autonomous
           // turn did not park, so it must not leave a park behind for `execute`
           // to settle.
-          if (parksWorkflow) state.askPark = 'waiting';
+          if (parksWorkflow || (state.graphWorker && ask)) state.askPark = 'waiting';
+          if (state.graphWorker && ask && state.graphParent) state.graphParent.askPark = 'waiting';
+          if (state.currentGraphVisitId) this.updateGraphVisitStatus(runId, state.currentGraphVisitId, 'waiting');
           if (monitoring) {
             this.store.updateRun(runId, { status: 'running', activity: 'monitoring' });
             this.store.updateStep(runId, step.id, { status: 'running' });
@@ -4496,6 +4999,7 @@ export class RunManager {
           env: stepProfile.env,
           model: backendModel,
           sessionId,
+          resume: persistedGraphSession !== undefined,
           // Interactive sessions have no wall clock — the idle timer rules.
           //
           // A non-final step keeps its wall clock (`DEFAULT_RUN_TIMEOUT_MS`)
@@ -4524,6 +5028,7 @@ export class RunManager {
       return err instanceof Error ? err.message : String(err);
     }
     state.session = session;
+    this.recordGraphSession(runId, state, sessionId, backend, true);
     state.sessionEverOpened = true;
     this.flushDeferred(runId);
     state.currentStepId = step.id;
@@ -4549,12 +5054,23 @@ export class RunManager {
       this.recordUsagePeaks(runId);
       this.clearIdleTimer(state);
       this.leaveMonitoring(runId);
-      this.waiting.delete(runId);
+      if (state.graphWorker && state.graphParent?.askPark === 'waiting') this.waiting.add(runId);
+      else this.waiting.delete(runId);
       this.clearMonitoringWakeTimer(state, runId);
       state.session = undefined;
+      this.recordGraphSession(runId, state, sessionId, backend, false);
       state.currentStepId = undefined;
       state.interrupt = () => undefined;
     }
+  }
+
+  private recordGraphSession(runId: string, state: ActiveRun, sessionId: string, backend: RunnerId, active: boolean): void {
+    const visitId = state.currentGraphVisitId;
+    const execution = this.store.getRun(runId)?.graphExecution;
+    if (!visitId || !execution) return;
+    const activeSessions = execution.activeSessions.filter((entry) => entry.visitId !== visitId);
+    if (active) activeSessions.push({ visitId, sessionId, backend });
+    this.store.updateRun(runId, { graphExecution: { ...execution, activeSessions } });
   }
 
   /**
@@ -4566,10 +5082,10 @@ export class RunManager {
    * guardrails). One sink per session: cumulative usage dedup and the
    * item-shape cache are session-scoped, like the mapper state feeding them.
    */
-  private makeUiSink(runId: string, stepId: string): UiEventSink {
+  private makeUiSink(runId: string, stepId: string, nodeId?: string): UiEventSink {
     return new UiEventSink({
-      persist: (event) => this.store.appendEvent(runId, { ...event, stepId }),
-      emitLive: (event) => this.store.emitEphemeral(runId, { ...event, stepId }),
+      persist: (event) => this.store.appendEvent(runId, { ...event, stepId, ...(nodeId ? { nodeId } : {}) }),
+      emitLive: (event) => this.store.emitEphemeral(runId, { ...event, stepId, ...(nodeId ? { nodeId } : {}) }),
     });
   }
 
@@ -4583,6 +5099,12 @@ export class RunManager {
     this.leaveMonitoring(runId);
     this.clearMonitoringWakeTimer(state, runId);
     this.waiting.add(runId);
+    if (state.graphWorker) {
+      state.askPark = 'waiting';
+      if (state.currentGraphVisitId) this.updateGraphVisitStatus(runId, state.currentGraphVisitId, 'waiting');
+      if (state.graphParent) state.graphParent.askPark = 'waiting';
+      this.store.updateRun(runId, { askParked: true });
+    }
     this.store.updateRun(runId, { status: 'waiting', activity: undefined });
     if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
     this.releaseSlot();
@@ -5181,7 +5703,7 @@ export class RunManager {
     state: ActiveRun,
     step: WorkflowStepDef,
     emit: (event: { type: string; stepId?: string; [k: string]: unknown }) => void,
-  ): Promise<{ ok: boolean; output: string }> {
+  ): Promise<{ ok: boolean; output: string; executionError?: string }> {
     const command = step.command as string;
     emit({ type: 'note', stepId: step.id, message: `$ ${command}` });
     return new Promise((resolve) => {
@@ -5202,7 +5724,7 @@ export class RunManager {
         state.interrupt = () => undefined;
         const message = `failed to spawn: ${err.message}`;
         emit({ type: 'check-output', stepId: step.id, command, text: message, exitCode: -1 });
-        resolve({ ok: false, output: message });
+        resolve({ ok: false, output: message, executionError: message });
       });
       child.on('close', (code) => {
         state.interrupt = () => undefined;

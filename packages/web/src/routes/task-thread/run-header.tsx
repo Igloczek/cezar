@@ -350,7 +350,7 @@ function RunHeaderView({
 
         {run.steps.length > 0 ? (
           <div className="border-t border-border pt-1 pb-0 md:pt-2 md:pb-1">
-            <WorkflowSteps runId={run.id} steps={run.steps} />
+            <WorkflowSteps runId={run.id} steps={run.steps} graphExecution={run.graphExecution} />
           </div>
         ) : null}
 

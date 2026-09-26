@@ -23,6 +23,8 @@ export const runEventSchema = z.looseObject({
   seq: z.number(),
   ts: z.string(),
   stepId: z.string().optional(),
+  /** Graph activation identity; stepId remains for existing transcript consumers. */
+  nodeId: z.string().optional(),
   type: z.string(),
 });
 export type RunEvent = z.infer<typeof runEventSchema>;
@@ -63,6 +65,7 @@ export const runHistoryEventSchema = z.object({
   seq: z.number(),
   ts: z.string(),
   stepId: z.string().optional(),
+  nodeId: z.string().optional(),
   type: z.string(),
 }).catchall(z.any());
 export type RunHistoryEvent = z.infer<typeof runHistoryEventSchema>;

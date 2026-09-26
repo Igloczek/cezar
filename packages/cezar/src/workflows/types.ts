@@ -30,6 +30,8 @@ export const workflowStepSchema = z
     runner: z.enum(RUNNER_IDS).optional(),
     allowedTools: z.array(z.string()).optional(),
     bashAllowlist: z.array(z.string()).optional(),
+    /** Result labels an agent node may return with a final `CEZ:RESULT=<label>` line. */
+    results: z.array(z.string().min(1)).optional(),
     // check step
     command: z.string().optional(),
     onFail: z
@@ -43,6 +45,58 @@ export const workflowStepSchema = z
     message: 'a step is either an agent step (prompt/skill) or a check step (command), not both',
   });
 
+/** Directed workflow graph. Edge labels match an agent's declared result or a
+ * check's `passed`/`failed` outcome; unlabeled edges always fire. */
+export const workflowGraphNodeSchema = z.object({
+  id: z.string().min(1),
+  name: z.string().optional(),
+  kind: z.enum(['agent', 'check']),
+  prompt: z.string().optional(),
+  skill: z.string().optional(),
+  model: z.string().optional(),
+  runner: z.enum(RUNNER_IDS).optional(),
+  allowedTools: z.array(z.string()).optional(),
+  bashAllowlist: z.array(z.string()).optional(),
+  command: z.string().optional(),
+  results: z.array(z.string().min(1)).optional(),
+  join: z.literal('all').optional(),
+}).superRefine((node, ctx) => {
+  const valid = node.kind === 'agent'
+    ? Boolean(node.prompt ?? node.skill) && !node.command
+    : Boolean(node.command) && !node.prompt && !node.skill;
+  if (!valid) ctx.addIssue({ code: 'custom', message: 'agent nodes need a prompt or skill; check nodes need a command' });
+});
+
+export const workflowGraphEdgeSchema = z.object({
+  from: z.string().min(1),
+  to: z.string().min(1),
+  when: z.string().min(1).optional(),
+});
+
+export const workflowGraphSchema = z.object({
+  entry: z.string().min(1),
+  nodes: z.array(workflowGraphNodeSchema).min(1),
+  edges: z.array(workflowGraphEdgeSchema),
+  terminals: z.array(z.string().min(1)).min(1),
+}).superRefine((graph, ctx) => {
+  const ids = graph.nodes.map((node) => node.id);
+  if (new Set(ids).size !== ids.length) ctx.addIssue({ code: 'custom', message: 'graph node ids must be unique' });
+  if (!ids.includes(graph.entry)) ctx.addIssue({ code: 'custom', message: `graph entry "${graph.entry}" is not a node` });
+  for (const terminal of graph.terminals) if (!ids.includes(terminal)) ctx.addIssue({ code: 'custom', message: `graph terminal "${terminal}" is not a node` });
+  for (const edge of graph.edges) {
+    if (!ids.includes(edge.from) || !ids.includes(edge.to)) ctx.addIssue({ code: 'custom', message: `graph edge "${edge.from}" → "${edge.to}" references an unknown node` });
+    const source = graph.nodes.find((node) => node.id === edge.from);
+    if (edge.when && source?.kind === 'agent' && !source.results?.includes(edge.when)) ctx.addIssue({ code: 'custom', message: `graph edge result "${edge.when}" is not declared by node "${edge.from}"` });
+    if (source?.kind === 'check' && edge.when && edge.when !== 'passed' && edge.when !== 'failed') ctx.addIssue({ code: 'custom', message: `check node "${edge.from}" routes only on "passed" or "failed"` });
+  }
+  for (const node of graph.nodes) {
+    if (node.results && new Set(node.results).size !== node.results.length) ctx.addIssue({ code: 'custom', message: `graph node "${node.id}" has duplicate result labels` });
+    if (node.join === 'all' && !graph.edges.some((edge) => edge.to === node.id)) ctx.addIssue({ code: 'custom', message: `join node "${node.id}" has no incoming edges` });
+    if (graph.terminals.includes(node.id) && graph.edges.some((edge) => edge.from === node.id)) ctx.addIssue({ code: 'custom', message: `terminal node "${node.id}" cannot have outgoing edges` });
+  }
+});
+export type WorkflowGraph = z.infer<typeof workflowGraphSchema>;
+
 /**
  * A workflow file names either full `steps` or the portable `skills` shorthand
  * (spec 012 — what the builder exports): an ordered list of skill names, each
@@ -54,9 +108,10 @@ export const workflowFileSchema = z
     description: z.string().optional(),
     steps: z.array(workflowStepSchema).min(1).optional(),
     skills: z.array(z.string().trim().min(1)).min(1).optional(),
+    graph: workflowGraphSchema.optional(),
   })
-  .refine((d) => Boolean(d.steps) !== Boolean(d.skills), {
-    message: 'a workflow lists either "steps" or "skills", not both',
+  .refine((d) => [d.steps, d.skills, d.graph].filter(Boolean).length === 1, {
+    message: 'a workflow lists exactly one of "steps", "skills" or "graph"',
   });
 
 export type WorkflowStepDef = z.infer<typeof workflowStepSchema>;
@@ -73,6 +128,7 @@ export const workflowDefSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
   steps: z.array(workflowStepSchema),
+  graph: workflowGraphSchema.optional(),
   source: z.enum(['built-in', 'file']),
   path: z.string().optional(),
 });
@@ -95,11 +151,15 @@ export function normalizeWorkflowDoc(doc: WorkflowDoc): {
   name: string;
   description?: string;
   steps: WorkflowStepDef[];
+  graph?: WorkflowGraph;
 } {
   return {
     name: doc.name,
     ...(doc.description ? { description: doc.description } : {}),
-    steps: doc.steps ?? skillsToSteps(doc.skills ?? []),
+    steps: doc.steps ?? (doc.graph ? doc.graph.nodes.map((node) => node.kind === 'check'
+      ? { id: node.id, name: node.name, command: node.command }
+      : { id: node.id, name: node.name, prompt: node.prompt, skill: node.skill, model: node.model, runner: node.runner, allowedTools: node.allowedTools, bashAllowlist: node.bashAllowlist, results: node.results }) : skillsToSteps(doc.skills ?? [])),
+    ...(doc.graph ? { graph: doc.graph } : {}),
   };
 }
 

@@ -96,6 +96,25 @@ const stepStateSchema = z.object({
   costUsd: z.number().optional(),
 });
 
+const graphVisitSchema = z.object({
+  visitId: z.string(), nodeId: z.string(), status: z.enum(['pending', 'running', 'waiting', 'done', 'failed', 'cancelled']),
+  result: z.string().optional(), report: z.string().optional(), startedAt: z.string().optional(), finishedAt: z.string().optional(),
+  lineage: z.array(z.object({ forkId: z.string(), branchId: z.string(), joinId: z.string() })).optional(),
+});
+const graphActivationSchema = z.object({
+  nodeId: z.string(),
+  lineage: z.array(z.object({ forkId: z.string(), branchId: z.string(), joinId: z.string() })),
+  resumeVisitId: z.string().optional(),
+});
+const graphExecutionSchema = z.object({
+  visits: z.array(graphVisitSchema),
+  pendingActivations: z.array(graphActivationSchema).optional(),
+  joinWaiters: z.array(graphActivationSchema).optional(),
+  routingDecisions: z.array(z.object({ visitId: z.string(), from: z.string(), to: z.string(), when: z.string().optional() })),
+  activeSessions: z.array(z.object({ visitId: z.string(), sessionId: z.string(), backend: storedRunnerSchema.optional() })),
+  joinProgress: z.array(z.object({ nodeId: z.string(), visitId: z.string(), expected: z.number().int().nonnegative(), arrived: z.number().int().nonnegative(), arrivedBranches: z.array(z.string()).optional() })),
+});
+
 /** One prompt message stacked onto a run while it waits for a free agent slot
  *  (#472). Folded into `{{task}}` at dequeue by `hydrateQueuedInput`; never
  *  delivered as its own turn — a follow-up turn would reach only the first step
@@ -370,6 +389,8 @@ export const runRecordSchema = z.object({
    *  `workflowStepSchema` only with that in mind: a narrowing here silently eats
    *  queued runs rather than degrading them. */
   workflowDef: workflowDefSchema.optional().catch(undefined),
+  /** Graph node activations remain on this run; there is never one RunRecord per node. */
+  graphExecution: graphExecutionSchema.optional().catch(undefined),
 });
 
 export type StepState = z.infer<typeof stepStateSchema>;
@@ -381,6 +402,7 @@ export interface RunEvent {
   seq: number;
   ts: string;
   stepId?: string;
+  nodeId?: string;
   type: string;
   [key: string]: unknown;
 }

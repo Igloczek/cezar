@@ -33,7 +33,7 @@ import { useParams } from 'react-router'
 
 import { ApiError, createWorkflow, deleteWorkflow, parseWorkflow, postPlan } from '@/api/client'
 import { queryKeys, useSkills, useUiState, useWorkflows } from '@/api/queries'
-import type { Skill, WorkflowDef, WorkflowStepDef } from '@open-mercato/cezar-api-client'
+import type { Skill, WorkflowDef, WorkflowGraph, WorkflowStepDef } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { SkillEmptyHintCompact } from '@/components/skill-empty-hint'
 import {
@@ -97,6 +97,7 @@ type Draft = {
   name: string
   description: string
   steps: WorkflowStepDef[]
+  graph?: WorkflowGraph
 }
 
 type DragItem = { type: 'palette'; skill: string } | { type: 'step'; step: WorkflowStepDef }
@@ -110,6 +111,7 @@ function draftFrom(workflow: WorkflowDef): Draft {
     name: workflow.name,
     description: workflow.description ?? '',
     steps: structuredClone(workflow.steps ?? []),
+    ...(workflow.graph ? { graph: structuredClone(workflow.graph) } : {}),
   }
 }
 
@@ -165,7 +167,7 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
   const importMutation = useMutation({
     mutationFn: (yaml: string) => parseWorkflow(yaml),
     onSuccess: (parsed) => {
-      setDraft({ name: parsed.name, description: parsed.description ?? '', steps: parsed.steps })
+      setDraft({ name: parsed.name, description: parsed.description ?? '', steps: parsed.steps, ...(parsed.graph ? { graph: parsed.graph } : {}) })
       setImportOpen(false)
       setImportText('')
       setImportError('')
@@ -199,11 +201,12 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
   })
 
   const save = useMutation({
-    mutationFn: (overwrite: boolean) =>
-      createWorkflow({
-        ...saveBody(draft?.name ?? '', draft?.description ?? '', draft?.steps ?? []),
-        ...(overwrite ? { overwrite: true } : {}),
-      }),
+    mutationFn: (overwrite: boolean) => createWorkflow({
+      ...(draft?.graph
+        ? { name: draft.name, description: draft.description || undefined, graph: draft.graph }
+        : saveBody(draft?.name ?? '', draft?.description ?? '', draft?.steps ?? [])),
+      ...(overwrite ? { overwrite: true } : {}),
+    }),
     onSuccess: (saved) => {
       setConfirmOverwrite(false)
       toast(`Saved — ${saved.path.split('/').pop() ?? saved.path}`)
@@ -250,6 +253,77 @@ function WorkflowsBuilder({ routeName }: { routeName: string | undefined }) {
     )
   }
   if (draft === null) return <WorkflowsLoading />
+
+  if (draft.graph) {
+    return (
+      <main data-route="workflows" className="flex min-h-full flex-col gap-5 p-3 md:p-5">
+        <header>
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h1 className="text-base font-semibold">Workflows</h1>
+              <p className="mt-1 text-[13px] text-muted-foreground">Directed graph catalog · read only</p>
+            </div>
+            {workflows.some((workflow) => workflow.name === draft.name && workflow.source === 'file') ? null : (
+              <Button type="button" variant="contrast" size="sm" disabled={save.isPending} onClick={() => save.mutate(false)}>
+                <CheckIcon aria-hidden="true" className="size-3" /> Save graph
+              </Button>
+            )}
+          </div>
+        </header>
+        <AlertDialog open={confirmOverwrite} onOpenChange={setConfirmOverwrite}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Replace this workflow?</AlertDialogTitle>
+              <AlertDialogDescription>A workflow named “{draft.name}” already exists. Replace its YAML file?</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Keep existing</AlertDialogCancel>
+              <AlertDialogAction onClick={() => save.mutate(true)}>Replace workflow</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        <nav aria-label="Workflow catalog" className="flex flex-wrap gap-1.5">
+          {workflows.map((workflow) => (
+            <button key={workflow.name} type="button" aria-current={workflow.name === draft.name ? 'page' : undefined}
+              onClick={() => setDraft(draftFrom(workflow))}
+              className="rounded-full border border-border bg-card px-2.5 py-1 font-mono text-[11.5px] text-muted-foreground hover:bg-muted hover:text-foreground">
+              {workflow.name}
+            </button>
+          ))}
+          <button type="button" onClick={() => setDraft(emptyDraft())}
+            className="rounded-full border border-dashed border-border px-2.5 py-1 font-mono text-[11.5px] text-muted-foreground hover:bg-muted">
+            + new linear workflow
+          </button>
+        </nav>
+        <section aria-label={`Graph for ${draft.name}`} className="max-w-4xl rounded-xl border border-border bg-card p-4">
+          <h2 className="font-mono text-sm font-semibold">{draft.name}</h2>
+          {draft.description ? <p className="mt-1 text-sm text-muted-foreground">{draft.description}</p> : null}
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {draft.graph.nodes.map((node) => (
+              <article key={node.id} className="min-w-0 rounded-lg border border-border bg-background p-3" data-graph-node={node.id}>
+                <div className="flex items-center gap-2">
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] uppercase text-muted-foreground">{node.kind}</span>
+                  {node.id === draft.graph?.entry ? <span className="text-[10px] text-primary">entry</span> : null}
+                  {draft.graph?.terminals.includes(node.id) ? <span className="text-[10px] text-primary">terminal</span> : null}
+                </div>
+                <h3 className="mt-2 truncate text-sm font-medium" title={node.name ?? node.id}>{node.name ?? node.id}</h3>
+                <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">{node.id}</p>
+                <ul className="mt-3 space-y-1 border-t border-border pt-2 text-xs">
+                  {draft.graph?.edges.filter((edge) => edge.from === node.id).map((edge, index) => (
+                    <li key={`${edge.to}-${edge.when ?? 'always'}-${index}`} className="flex min-w-0 items-center gap-1.5">
+                      <span className="truncate text-muted-foreground">{edge.when ?? 'always'}</span>
+                      <span aria-hidden="true">→</span>
+                      <span className="truncate font-mono" title={edge.to}>{edge.to}</span>
+                    </li>
+                  )) ?? <li className="text-muted-foreground">No outgoing edges</li>}
+                </ul>
+              </article>
+            ))}
+          </div>
+        </section>
+      </main>
+    )
+  }
 
   const steps = draft.steps
   const trimmedName = draft.name.trim()

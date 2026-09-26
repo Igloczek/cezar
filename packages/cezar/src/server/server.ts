@@ -56,6 +56,7 @@ import {
   modelDiscoveryRunnerSchema,
   openProjectInSchema,
   updateProjectInputSchema,
+  saveWorkflowInputSchema as saveWorkflowSchema,
 } from '@open-mercato/cezar-contract';
 import { dispatchInputSchema, dispatchIntentSchema, dispatchReportSchema } from '@open-mercato/cezar-contract';
 import { detectEnvironment } from '../core/backend-detect.ts';
@@ -696,23 +697,6 @@ const planSchema = z.object({
   // Same bound as `startRunSchema.task` — this flows into `planChain` (#429).
   task: z.string().trim().min(1).max(100_000, 'must be at most 100000 characters'),
 });
-
-// A saved workflow carries full `steps` OR the builder's `skills` stack
-// (spec 012). `overwrite: true` is the builder's Save on an existing file —
-// the GUI asks first; a plain POST still refuses to clobber.
-const saveWorkflowSchema = z
-  .object({
-    name: z.string().trim().min(1).max(80),
-    // Written into a YAML file on disk (#429) — a workflow description is a
-    // short blurb, so a 2k cap is generous without allowing a file-bloat write.
-    description: z.string().max(2_000, 'must be at most 2000 characters').optional(),
-    steps: z.array(workflowStepSchema).min(1).max(8).optional(),
-    skills: z.array(z.string().trim().min(1)).min(1).max(8).optional(),
-    overwrite: z.boolean().optional(),
-  })
-  .refine((b) => Boolean(b.steps) !== Boolean(b.skills), {
-    message: 'provide either "steps" or "skills", not both',
-  });
 
 const parseWorkflowSchema = z.object({
   yaml: z.string().min(1).max(100_000),
@@ -3238,7 +3222,8 @@ export function createApp(deps: ServerDeps) {
     .post('/workflows', jsonZodValidator(saveWorkflowSchema), async (c) => {
       const { root: repoRoot } = c.get('project');
       const parsed = { data: c.req.valid('json') };
-      const steps = parsed.data.steps ?? skillsToSteps(parsed.data.skills ?? []);
+      const graph = parsed.data.graph;
+      const steps = parsed.data.steps ?? (graph ? normalizeWorkflowDoc({ name: parsed.data.name, graph }).steps : skillsToSteps(parsed.data.skills ?? []));
       const issue = stepsIssue(steps);
       if (issue) return c.json({ error: issue }, 400);
       const slug = slugify(parsed.data.name) || 'chain';
@@ -3246,11 +3231,11 @@ export function createApp(deps: ServerDeps) {
       const path = join(dir, `${slug}.yaml`);
       // Pure skill stacks are written in the portable compact form (spec 012) —
       // `name` + `skills:` — so the file imports cleanly in any repo.
-      const stack = skillStackOf(steps);
+      const stack = graph ? null : skillStackOf(steps);
       const doc = {
         name: parsed.data.name,
         ...(parsed.data.description ? { description: parsed.data.description } : {}),
-        ...(stack ? { skills: stack } : { steps }),
+        ...(graph ? { graph } : stack ? { skills: stack } : { steps }),
       };
       try {
         await mkdir(dir, { recursive: true });

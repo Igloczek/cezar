@@ -845,6 +845,453 @@ describe('a chain of 2 selected skills runs BOTH steps, in order (#410)', () => 
   }, 30_000);
 });
 
+describe('graph workflows persist visits and route inside one task run', () => {
+  let repoRoot: string;
+  let store: RunStore;
+  let manager: RunManager;
+  const savedEnv: Record<string, string | undefined> = {};
+
+  beforeAll(async () => {
+    repoRoot = mkdtempSync(join(tmpdir(), 'cez-graph-run-'));
+    savedEnv.CEZ_DRY_RUN = process.env.CEZ_DRY_RUN;
+    process.env.CEZ_DRY_RUN = '1';
+    await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
+    writeFileSync(join(repoRoot, 'a.txt'), 'base\n');
+    await run('git', ['add', '-A'], { cwd: repoRoot });
+    await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
+    store = RunStore.open(join(repoRoot, '.ai/cezar'));
+    manager = new RunManager(store, repoRoot, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 1 } }) });
+  });
+
+  afterAll(() => {
+    manager.dispose();
+    for (const [key, value] of Object.entries(savedEnv)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+    store.flush();
+    rmSync(repoRoot, { recursive: true, force: true });
+  });
+
+  async function waitForTerminal(id: string) {
+    const terminal = new Set(['done', 'review', 'failed', 'cancelled']);
+    const deadline = Date.now() + 30_000;
+    while (!terminal.has(store.getRun(id)?.status ?? '')) {
+      if (Date.now() > deadline) throw new Error('graph run did not finish in time');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    return store.getRun(id)!;
+  }
+
+  it('routes check outcomes and loops beyond forty transitions without making child runs', async () => {
+    const workflow: WorkflowDef = {
+      name: 'graph-loop', source: 'file',
+      steps: [
+        { id: 'check', command: 'n=$(cat graph-count 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > graph-count; test "$n" -gt 41' },
+        { id: 'done', command: 'true' },
+      ],
+      graph: {
+        entry: 'check',
+        nodes: [
+          { id: 'check', kind: 'check', command: 'n=$(cat graph-count 2>/dev/null || echo 0); n=$((n+1)); echo "$n" > graph-count; test "$n" -gt 41' },
+          { id: 'done', kind: 'check', command: 'true' },
+        ],
+        edges: [{ from: 'check', to: 'check', when: 'failed' }, { from: 'check', to: 'done', when: 'passed' }],
+        terminals: ['done'],
+      },
+    };
+    const record = manager.startRun(workflow, { task: 'graph loop', worktree: false });
+    const finished = await waitForTerminal(record.id);
+    expect(finished.status).not.toBe('failed');
+    expect(finished.graphExecution?.visits.length).toBeGreaterThan(40);
+    expect(finished.graphExecution?.routingDecisions.filter((route) => route.when === 'failed').length).toBeGreaterThan(40);
+    expect(store.listRuns().filter((candidate) => candidate.workflow === 'graph-loop')).toHaveLength(1);
+    expect(finished.dispatch?.parentRunId).toBeUndefined();
+  }, 40_000);
+
+  it('fails the workflow when a graph check cannot start, instead of routing it as a failed check', async () => {
+    const workflow: WorkflowDef = {
+      name: 'graph-check-start-error', source: 'file',
+      steps: [{ id: 'check', command: 'true' }, { id: 'failed', command: 'true' }],
+      graph: {
+        entry: 'check',
+        nodes: [
+          { id: 'check', kind: 'check', command: 'true' },
+          { id: 'failed', kind: 'check', command: 'true' },
+        ],
+        edges: [{ from: 'check', to: 'failed', when: 'failed' }],
+        terminals: ['failed'],
+      },
+    };
+    const oldPath = process.env.PATH;
+    process.env.PATH = join(repoRoot, 'empty-bin');
+    try {
+      mkdirSync(process.env.PATH, { recursive: true });
+      const record = manager.startRun(workflow, { task: 'check execution error', worktree: false });
+      const finished = await waitForTerminal(record.id);
+      expect(finished.status).toBe('failed');
+      expect(finished.graphExecution?.routingDecisions).toHaveLength(0);
+      expect(finished.graphExecution?.visits[0]).toMatchObject({ nodeId: 'check', status: 'failed' });
+    } finally {
+      if (oldPath === undefined) delete process.env.PATH;
+      else process.env.PATH = oldPath;
+    }
+  }, 40_000);
+
+  it('waits for every activated branch before running a join node once', async () => {
+    const workflow: WorkflowDef = {
+      name: 'graph-join', source: 'file',
+      steps: [
+        { id: 'fork', prompt: 'mock:result=ready {{task}}', results: ['ready'] },
+        { id: 'a', command: 'true' }, { id: 'b', command: 'true' }, { id: 'join', command: 'true' },
+      ],
+      graph: {
+        entry: 'fork',
+        nodes: [
+          { id: 'fork', kind: 'agent', prompt: 'mock:result=ready {{task}}', results: ['ready'] },
+          { id: 'a', kind: 'check', command: 'true' },
+          { id: 'b', kind: 'check', command: 'true' },
+          { id: 'join', kind: 'check', command: 'true', join: 'all' },
+        ],
+        edges: [
+          { from: 'fork', to: 'a', when: 'ready' }, { from: 'fork', to: 'a' }, { from: 'fork', to: 'b' },
+          { from: 'a', to: 'join', when: 'passed' }, { from: 'b', to: 'join', when: 'passed' },
+        ],
+        terminals: ['join'],
+      },
+    };
+    const record = manager.startRun(workflow, { task: 'mock:done graph join', worktree: false });
+    const finished = await waitForTerminal(record.id);
+    expect(finished.status).not.toBe('failed');
+    expect(finished.graphExecution?.visits.filter((visit) => visit.nodeId === 'join')).toHaveLength(1);
+    expect(finished.graphExecution?.joinProgress).toContainEqual(expect.objectContaining({ nodeId: 'join', expected: 3, arrived: 3 }));
+    expect(finished.graphExecution?.visits.filter((visit) => visit.nodeId === 'a')).toHaveLength(2);
+  }, 40_000);
+
+  it('persists an ask as a waiting graph visit and routes after the answer', async () => {
+    const workflow: WorkflowDef = {
+      name: 'graph-ask', source: 'file',
+      steps: [{ id: 'ask', prompt: 'mock:ask {{task}}' }],
+      graph: {
+        entry: 'ask',
+        nodes: [{ id: 'ask', kind: 'agent', prompt: 'mock:ask {{task}}' }],
+        edges: [],
+        terminals: ['ask'],
+      },
+    };
+    const record = manager.startRun(workflow, { task: 'please choose', worktree: false });
+    const deadline = Date.now() + 20_000;
+    while (store.getRun(record.id)?.status !== 'waiting') {
+      if (Date.now() > deadline) throw new Error('graph ask did not park');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(store.getRun(record.id)?.graphExecution?.visits).toContainEqual(expect.objectContaining({ nodeId: 'ask', status: 'waiting' }));
+    expect(manager.sendMessage(record.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
+    const finished = await waitForTerminal(record.id);
+    expect(finished.graphExecution?.visits).toContainEqual(expect.objectContaining({ nodeId: 'ask', status: 'done' }));
+  }, 40_000);
+
+  it('recovery resumes persisted graph activations without replaying completed visits', async () => {
+    const workflow: WorkflowDef = {
+      name: 'graph-recovery', source: 'file',
+      steps: [{ id: 'first', command: 'true' }, { id: 'last', command: 'true' }],
+      graph: {
+        entry: 'first',
+        nodes: [
+          { id: 'first', kind: 'check', command: 'true' },
+          { id: 'last', kind: 'check', command: 'true' },
+        ],
+        edges: [{ from: 'first', to: 'last' }],
+        terminals: ['last'],
+      },
+    };
+    const record = manager.startRun(workflow, { task: 'recover graph cursor', worktree: false });
+    const initial = await waitForTerminal(record.id);
+    const visits = initial.graphExecution?.visits ?? [];
+    expect(visits.filter((visit) => visit.nodeId === 'first')).toHaveLength(1);
+    const execution = initial.graphExecution!;
+    store.updateRun(record.id, {
+      status: 'running',
+      finishedAt: undefined,
+      graphExecution: {
+        ...execution,
+        pendingActivations: [{ nodeId: 'last', lineage: [] }],
+      },
+    });
+
+    await manager.recover();
+    const recovered = await waitForTerminal(record.id);
+    expect(recovered.graphExecution?.visits.filter((visit) => visit.nodeId === 'first')).toHaveLength(1);
+    expect(recovered.graphExecution?.visits.filter((visit) => visit.nodeId === 'last')).toHaveLength(2);
+    expect(store.listRuns().filter((candidate) => candidate.workflow === 'graph-recovery')).toHaveLength(1);
+  }, 40_000);
+
+  it('recovery resumes the persisted graph visit and reuses its session id', async () => {
+    const workflow: WorkflowDef = {
+      name: 'graph-session-recovery', source: 'file',
+      steps: [{ id: 'review', prompt: 'mock:done resume interrupted review' }],
+      graph: {
+        entry: 'review',
+        nodes: [{ id: 'review', kind: 'agent', prompt: 'mock:done resume interrupted review' }],
+        edges: [],
+        terminals: ['review'],
+      },
+    };
+    const record = manager.startRun(workflow, { task: 'resume graph session', worktree: false });
+    const initial = await waitForTerminal(record.id);
+    const execution = initial.graphExecution!;
+    const visit = execution.visits[0]!;
+    const sessionId = initial.steps.find((step) => step.id === 'review')?.sessionId;
+    expect(sessionId).toBeTruthy();
+    store.updateRun(record.id, {
+      status: 'running',
+      finishedAt: undefined,
+      graphExecution: {
+        ...execution,
+        visits: execution.visits.map((item) => item.visitId === visit.visitId
+          ? { ...item, status: 'running' as const, finishedAt: undefined }
+          : item),
+        activeSessions: [{ visitId: visit.visitId, sessionId: sessionId! , backend: 'claude' }],
+        pendingActivations: [],
+      },
+    });
+
+    await manager.recover();
+    const recovered = await waitForTerminal(record.id);
+    expect(recovered.graphExecution?.visits).toHaveLength(1);
+    expect(recovered.graphExecution?.visits[0]?.visitId).toBe(visit.visitId);
+    expect(recovered.steps.find((step) => step.id === 'review')?.sessionId).toBe(sessionId);
+  }, 40_000);
+
+  it('recovery restores join waiters and branch arrivals from persisted graph state', async () => {
+    const workflow: WorkflowDef = {
+      name: 'graph-join-recovery', source: 'file',
+      steps: [
+        { id: 'fork', command: 'true' }, { id: 'a', command: 'true' },
+        { id: 'b', command: 'true' }, { id: 'join', command: 'true' },
+      ],
+      graph: {
+        entry: 'fork',
+        nodes: [
+          { id: 'fork', kind: 'check', command: 'true' },
+          { id: 'a', kind: 'check', command: 'true' },
+          { id: 'b', kind: 'check', command: 'true' },
+          { id: 'join', kind: 'check', command: 'true', join: 'all' },
+        ],
+        edges: [
+          { from: 'fork', to: 'a' }, { from: 'fork', to: 'b' },
+          { from: 'a', to: 'join' }, { from: 'b', to: 'join' },
+        ],
+        terminals: ['join'],
+      },
+    };
+    const record = manager.startRun(workflow, { task: 'recover a fork join', worktree: false });
+    const initial = await waitForTerminal(record.id);
+    const execution = initial.graphExecution!;
+    const fork = execution.visits.find((visit) => visit.nodeId === 'fork')!;
+    const visitA = execution.visits.find((visit) => visit.nodeId === 'a')!;
+    const visitB = execution.visits.find((visit) => visit.nodeId === 'b')!;
+    const lineageA = { forkId: fork.visitId, branchId: `${fork.visitId}:0`, joinId: 'join' };
+    const lineageB = { forkId: fork.visitId, branchId: `${fork.visitId}:1`, joinId: 'join' };
+    store.updateStep(record.id, 'b', { status: 'running' });
+    store.updateRun(record.id, {
+      status: 'running',
+      finishedAt: undefined,
+      graphExecution: {
+        ...execution,
+        visits: [
+          { ...fork, status: 'done' },
+          { ...visitA, status: 'done', lineage: [lineageA] },
+          { ...visitB, status: 'running', lineage: [lineageB] },
+        ],
+        routingDecisions: [
+          { visitId: fork.visitId, from: 'fork', to: 'a' },
+          { visitId: fork.visitId, from: 'fork', to: 'b' },
+          { visitId: visitA.visitId, from: 'a', to: 'join' },
+        ],
+        pendingActivations: [],
+        joinWaiters: [{ nodeId: 'join', lineage: [lineageA] }],
+        joinProgress: [{ nodeId: 'join', visitId: fork.visitId, expected: 2, arrived: 1, arrivedBranches: [lineageA.branchId] }],
+      },
+    });
+
+    await manager.recover();
+    const recovered = await waitForTerminal(record.id);
+    expect(recovered.graphExecution?.visits.filter((visit) => visit.nodeId === 'join')).toHaveLength(1);
+    expect(recovered.graphExecution?.visits.filter((visit) => visit.nodeId === 'b')).toHaveLength(1);
+    expect(recovered.graphExecution?.joinProgress).toContainEqual(expect.objectContaining({ nodeId: 'join', expected: 2, arrived: 2 }));
+  }, 40_000);
+
+  it('cancellation marks the active graph visit cancelled', async () => {
+    const workflow: WorkflowDef = {
+      name: 'graph-cancel', source: 'file',
+      steps: [{ id: 'slow', command: 'sleep 10' }],
+      graph: {
+        entry: 'slow',
+        nodes: [{ id: 'slow', kind: 'check', command: 'sleep 10' }],
+        edges: [],
+        terminals: ['slow'],
+      },
+    };
+    const record = manager.startRun(workflow, { task: 'cancel graph node', worktree: false });
+    const deadline = Date.now() + 10_000;
+    while (!store.getRun(record.id)?.graphExecution?.visits.some((visit) => visit.status === 'running')) {
+      if (Date.now() > deadline) throw new Error('graph node did not start');
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(manager.cancel(record.id)).toBe(true);
+    const finished = await waitForTerminal(record.id);
+    expect(finished.status).toBe('cancelled');
+    expect(finished.graphExecution?.visits).toContainEqual(expect.objectContaining({ nodeId: 'slow', status: 'cancelled' }));
+  }, 20_000);
+
+  it('runs forked review agents concurrently within maxParallel and rejoins once', async () => {
+    const parallelManager = new RunManager(store, repoRoot, {
+      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 2 } }),
+    });
+    const reviewIds = ['review-a', 'review-b', 'review-c', 'review-d', 'review-e'];
+    const models = ['review-model-a', 'review-model-b', 'review-model-c', 'review-model-d', 'review-model-e'];
+    const argsFile = join(repoRoot, 'graph-mock-args.ndjson');
+    const previousArgsFile = process.env.CEZ_MOCK_ARGS_FILE;
+    writeFileSync(argsFile, '');
+    process.env.CEZ_MOCK_ARGS_FILE = argsFile;
+    const nodes = [
+      { id: 'fork', kind: 'agent' as const, prompt: 'mock:result=ready {{task}}', results: ['ready'] },
+      ...reviewIds.map((id, index) => ({ id, kind: 'agent' as const, prompt: `mock:result=done ${id} {{task}}`, model: models[index], results: ['done'] })),
+      { id: 'join', kind: 'check' as const, command: 'true', join: 'all' as const },
+    ];
+    const steps = nodes.map((node) => node.kind === 'check'
+      ? { id: node.id, command: node.command }
+      : { id: node.id, prompt: node.prompt, model: node.model, results: node.results });
+    const edges = [
+      ...reviewIds.map((id) => ({ from: 'fork', to: id, when: 'ready' })),
+      ...reviewIds.map((id) => ({ from: id, to: 'join', when: 'done' })),
+    ];
+    const workflow: WorkflowDef = {
+      name: 'graph-parallel-reviews', source: 'file', steps,
+      graph: { entry: 'fork', nodes, edges, terminals: ['join'] },
+    };
+    try {
+      const record = parallelManager.startRun(workflow, { task: 'review the same change', worktree: false });
+      let peak = 0;
+      let peakBusy = 0;
+      const workerMap = (parallelManager as unknown as { graphWorkers: Map<string, Map<string, unknown>> }).graphWorkers;
+      const semaphore = (parallelManager as unknown as { semaphore: WorkspaceSemaphore }).semaphore;
+      const deadline = Date.now() + 30_000;
+      while (!['done', 'review', 'failed', 'cancelled'].includes(store.getRun(record.id)?.status ?? '')) {
+        peak = Math.max(peak, workerMap.get(record.id)?.size ?? 0);
+        peakBusy = Math.max(peakBusy, semaphore.busy());
+        if (Date.now() > deadline) throw new Error('parallel graph run did not finish in time');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const finished = store.getRun(record.id)!;
+      expect(finished.status, `${finished.error}; ${JSON.stringify(finished.graphExecution?.visits)}`).not.toBe('failed');
+      expect(peak).toBe(2);
+      expect(peakBusy).toBeLessThanOrEqual(2);
+      expect(finished.graphExecution?.visits.filter((visit) => reviewIds.includes(visit.nodeId))).toHaveLength(5);
+      expect(finished.graphExecution?.visits.filter((visit) => visit.nodeId === 'join'), JSON.stringify(finished.graphExecution)).toHaveLength(1);
+      expect(store.listRuns().filter((candidate) => candidate.workflow === 'graph-parallel-reviews')).toHaveLength(1);
+      const invokedModels = readFileSync(argsFile, 'utf8').trim().split('\n')
+        .map((line) => JSON.parse(line) as string[])
+        .flatMap((args) => {
+          const modelIndex = args.indexOf('--model');
+          return modelIndex >= 0 ? [args[modelIndex + 1]!] : [];
+        }).sort();
+      expect(invokedModels).toEqual([...models].sort());
+    } finally {
+      if (previousArgsFile === undefined) delete process.env.CEZ_MOCK_ARGS_FILE;
+      else process.env.CEZ_MOCK_ARGS_FILE = previousArgsFile;
+      parallelManager.dispose();
+    }
+  }, 60_000);
+
+  it('stops dispatching queued branches while a running graph node asks', async () => {
+    const parallelManager = new RunManager(store, repoRoot, {
+      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 2 } }),
+    });
+    const workflow: WorkflowDef = {
+      name: 'graph-parallel-ask', source: 'file',
+      steps: [
+        { id: 'fork', prompt: 'mock:result=ready {{task}}', results: ['ready'] },
+        { id: 'ask', prompt: 'mock:ask {{task}}' },
+        { id: 'review-b', prompt: 'mock:result=done review-b {{task}}', results: ['done'] },
+        { id: 'review-c', prompt: 'mock:result=done review-c {{task}}', results: ['done'] },
+        { id: 'join', command: 'true' },
+      ],
+      graph: {
+        entry: 'fork',
+        nodes: [
+          { id: 'fork', kind: 'agent', prompt: 'mock:result=ready {{task}}', results: ['ready'] },
+          { id: 'ask', kind: 'agent', prompt: 'mock:ask {{task}}' },
+          { id: 'review-b', kind: 'agent', prompt: 'mock:result=done review-b {{task}}', results: ['done'] },
+          { id: 'review-c', kind: 'agent', prompt: 'mock:result=done review-c {{task}}', results: ['done'] },
+          { id: 'join', kind: 'check', command: 'true', join: 'all' },
+        ],
+        edges: [
+          { from: 'fork', to: 'ask' }, { from: 'fork', to: 'review-b' }, { from: 'fork', to: 'review-c' },
+          { from: 'ask', to: 'join' },
+          { from: 'review-b', to: 'join', when: 'done' },
+          { from: 'review-c', to: 'join', when: 'done' },
+        ],
+        terminals: ['join'],
+      },
+    };
+    try {
+      const record = parallelManager.startRun(workflow, { task: 'review and ask before continuing', worktree: false });
+      const deadline = Date.now() + 30_000;
+      while (store.getRun(record.id)?.status !== 'waiting') {
+        if (Date.now() > deadline) throw new Error('graph agent did not ask');
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const parked = store.getRun(record.id)!;
+      expect(parked.graphExecution?.visits.some((visit) => visit.nodeId === 'review-c')).toBe(false);
+      expect(parked.graphExecution?.pendingActivations?.some((work) => work.nodeId === 'review-c')).toBe(true);
+      expect(parallelManager.sendMessage(record.id, [{ type: 'text', text: 'my answer' }])).toBe(true);
+      const finished = await waitForTerminal(record.id);
+      expect(finished.status, `${finished.error}; ${JSON.stringify(finished.graphExecution?.visits)}`).not.toBe('failed');
+      expect(finished.graphExecution?.visits.filter((visit) => visit.nodeId === 'review-c')).toHaveLength(1);
+      expect(finished.graphExecution?.visits.filter((visit) => visit.nodeId === 'join'), JSON.stringify(finished.graphExecution)).toHaveLength(1);
+    } finally {
+      parallelManager.dispose();
+    }
+  }, 60_000);
+
+  it('fails on an agent execution error and cancels other active graph visits', async () => {
+    const parallelManager = new RunManager(store, repoRoot, {
+      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 2 } }),
+    });
+    const workflow: WorkflowDef = {
+      name: 'graph-execution-error', source: 'file',
+      steps: [
+        { id: 'fork', prompt: 'mock:result=ready {{task}}', results: ['ready'] },
+        { id: 'error', prompt: 'mock:auth-error' },
+        { id: 'slow', prompt: 'mock:slow wait {{task}}' },
+      ],
+      graph: {
+        entry: 'fork',
+        nodes: [
+          { id: 'fork', kind: 'agent', prompt: 'mock:result=ready {{task}}', results: ['ready'] },
+          { id: 'error', kind: 'agent', prompt: 'mock:auth-error' },
+          { id: 'slow', kind: 'agent', prompt: 'mock:slow wait {{task}}' },
+        ],
+        edges: [{ from: 'fork', to: 'error' }, { from: 'fork', to: 'slow' }],
+        terminals: ['error', 'slow'],
+      },
+    };
+    try {
+      const record = parallelManager.startRun(workflow, { task: 'exercise graph failure handling', worktree: false });
+      const finished = await waitForTerminal(record.id);
+      expect(finished.status).toBe('failed');
+      expect(finished.error).toContain('graph node "error" failed');
+      expect(finished.graphExecution?.visits).toContainEqual(expect.objectContaining({ nodeId: 'error', status: 'failed' }));
+      expect(finished.graphExecution?.visits).toContainEqual(expect.objectContaining({ nodeId: 'slow', status: 'cancelled' }));
+    } finally {
+      parallelManager.dispose();
+    }
+  }, 30_000);
+});
+
 /**
  * The other half of #410's contract: the note exists to explain a step
  * boundary, so a workflow with only ONE agent step must not get it — its

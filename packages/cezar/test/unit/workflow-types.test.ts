@@ -37,6 +37,42 @@ test('workflow files require exactly one step representation', () => {
   );
 });
 
+test('graph workflows validate routes and normalize their node definitions', () => {
+  const graph = workflowFileSchema.parse({
+    name: 'review-graph',
+    graph: {
+      entry: 'review',
+      nodes: [
+        { id: 'review', kind: 'agent', prompt: 'Review {{task}}', results: ['clean'] },
+        { id: 'verify', kind: 'check', command: 'npm test' },
+      ],
+      edges: [{ from: 'review', to: 'verify', when: 'clean' }],
+      terminals: ['verify'],
+    },
+  });
+  const normalized = normalizeWorkflowDoc(graph);
+  assert.equal(normalized.steps.length, 2);
+  assert.equal(normalized.steps[0]?.id, 'review');
+  assert.equal(normalized.steps[0]?.results?.[0], 'clean');
+  assert.equal(normalized.graph?.edges[0]?.when, 'clean');
+  assert.equal(workflowFileSchema.safeParse({
+    name: 'invalid-graph',
+    graph: { entry: 'review', nodes: [{ id: 'review', kind: 'agent', prompt: 'review' }], edges: [{ from: 'review', to: 'missing' }], terminals: ['review'] },
+  }).success, false);
+  assert.equal(workflowFileSchema.safeParse({
+    name: 'undeclared-result',
+    graph: {
+      entry: 'review',
+      nodes: [
+        { id: 'review', kind: 'agent', prompt: 'review', results: ['clean'] },
+        { id: 'finish', kind: 'check', command: 'true' },
+      ],
+      edges: [{ from: 'review', to: 'finish', when: 'passed' }],
+      terminals: ['finish'],
+    },
+  }).success, false);
+});
+
 test('retry targets must refer to an earlier unique step', () => {
   assert.equal(
     stepsIssue([

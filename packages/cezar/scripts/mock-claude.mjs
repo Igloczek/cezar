@@ -108,6 +108,10 @@ async function respond(userText, imageCount) {
     (autonomousArmed && userText.includes(AUTONOMOUS_NUDGE_PREFIX))
       ? '\n\nCEZ:DONE'
       : '';
+  // Graph routing tests declare a result label in the prompt; the mock returns the same label
+  // on its final line so the engine's protocol marker is exercised without a real backend.
+  const graphResult = /mock:result=([A-Za-z0-9._-]+)/.exec(userText);
+  const graphResultMarker = graphResult ? `\n\nCEZ:RESULT=${graphResult[1]}` : '';
   // `mock:monitoring` → the reply ends with CEZ:MONITORING, the "still working
   // on downstream work" marker (#490), so the monitoring-status path is testable dry.
   // `mock:monitoring-refs` → the same marker, but with task-reference marker lines AFTER it
@@ -494,7 +498,7 @@ async function respond(userText, imageCount) {
       type: 'assistant',
       message: {
         role: 'assistant',
-        content: [{ type: 'text', text: `Done with the first pass — opened a draft PR: https://github.com/open-mercato/demo/pull/123. Anything to adjust? (dry-run mock)${refsMarkers}${doneMarker}${monitoringMarker}${askMarker}` }],
+        content: [{ type: 'text', text: `Done with the first pass — opened a draft PR: https://github.com/open-mercato/demo/pull/123. Anything to adjust? (dry-run mock)${refsMarkers}${doneMarker}${monitoringMarker}${askMarker}${graphResultMarker}` }],
         usage: { input_tokens: 300, output_tokens: 90 },
       },
     });

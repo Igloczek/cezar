@@ -54,6 +54,22 @@ const FULL: WorkflowDef = {
   })),
 }
 
+const GRAPH: WorkflowDef = {
+  name: 'parallel-review',
+  source: 'file',
+  path: '.ai/cezar/workflows/parallel-review.yaml',
+  steps: [{ id: 'review-a', prompt: 'Review part A' }],
+  graph: {
+    entry: 'review-a',
+    nodes: [
+      { id: 'review-a', name: 'Review A', kind: 'agent', prompt: 'Review part A', results: ['clean', 'changes'] },
+      { id: 'done', name: 'Done', kind: 'agent', prompt: 'Finish', join: 'all' },
+    ],
+    edges: [{ from: 'review-a', to: 'done', when: 'clean' }, { from: 'review-a', to: 'done' }],
+    terminals: ['done'],
+  },
+}
+
 interface SentRequest {
   path: string
   method: string
@@ -104,6 +120,18 @@ function renderAt(entry: string) {
     </QueryClientProvider>,
   )
 }
+
+describe('graph catalog', () => {
+  it('shows graph workflows as a read-only catalog with node and edge labels', async () => {
+    stubFetch({}, [GRAPH, QUICK])
+    renderAt('/workflows')
+    expect(await screen.findByRole('heading', { name: 'parallel-review' })).toBeTruthy()
+    expect(screen.getByText('Review A')).toBeTruthy()
+    expect(screen.getByText('clean')).toBeTruthy()
+    expect(screen.getAllByText('done').length).toBeGreaterThan(1)
+    expect(screen.getByText('Directed graph catalog · read only')).toBeTruthy()
+  })
+})
 
 const stepCards = () => [...document.querySelectorAll<HTMLElement>('[data-slot="wb-step"]')]
 const stepIds = () => stepCards().map((card) => card.dataset.id)

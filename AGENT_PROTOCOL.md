@@ -261,6 +261,13 @@ native requests receive an error response rather than hanging the turn. A
 malformed marker degrades to plain text — the prose fallback is never made
 worse.
 
+**Graph workflow results (`CEZ:RESULT=<label>`).** An agent node that declares
+`results` in a graph workflow returns one of those labels on its own final
+line. The marker is control text: it is removed from the visible transcript,
+persisted as the node visit's result, and used to activate every matching
+outgoing edge plus unconditional edges. A missing or unrouted label fails the
+workflow rather than leaving the graph waiting without an explanation.
+
 Two bounded forgiveness layers sit **under** that schema, and neither loosens
 it. `normalizeAskRequest` recovers presentation drift (unknown keys dropped, an
 over-long `header`/`description` clipped) — never counts, never choices.

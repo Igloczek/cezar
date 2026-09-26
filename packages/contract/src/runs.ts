@@ -92,6 +92,31 @@ export const stepStateSchema = z.object({
   profileId: z.string().optional(),
   costUsd: z.number().optional(),
 });
+
+export const graphVisitSchema = z.object({
+  visitId: z.string(),
+  nodeId: z.string(),
+  status: z.enum(['pending', 'running', 'waiting', 'done', 'failed', 'cancelled']),
+  result: z.string().optional(),
+  report: z.string().optional(),
+  startedAt: z.string().optional(),
+  finishedAt: z.string().optional(),
+  lineage: z.array(z.object({ forkId: z.string(), branchId: z.string(), joinId: z.string() })).optional(),
+});
+export const graphActivationSchema = z.object({
+  nodeId: z.string(),
+  lineage: z.array(z.object({ forkId: z.string(), branchId: z.string(), joinId: z.string() })),
+  resumeVisitId: z.string().optional(),
+});
+export const graphExecutionSchema = z.object({
+  visits: z.array(graphVisitSchema),
+  pendingActivations: z.array(graphActivationSchema).optional(),
+  joinWaiters: z.array(graphActivationSchema).optional(),
+  routingDecisions: z.array(z.object({ visitId: z.string(), from: z.string(), to: z.string(), when: z.string().optional() })),
+  activeSessions: z.array(z.object({ visitId: z.string(), sessionId: z.string(), backend: runnerSchema.optional() })),
+  joinProgress: z.array(z.object({ nodeId: z.string(), visitId: z.string(), expected: z.number().int().nonnegative(), arrived: z.number().int().nonnegative(), arrivedBranches: z.array(z.string()).optional() })),
+});
+export type GraphExecution = z.infer<typeof graphExecutionSchema>;
 export type StepState = z.infer<typeof stepStateSchema>;
 
 /** Aggregate diff numbers of a run's worktree vs its base (#389). */
@@ -300,6 +325,7 @@ export const runRecordSchema = z.object({
    * like every other key.
    */
   workflowDef: workflowDefSchema.optional(),
+  graphExecution: graphExecutionSchema.optional(),
 });
 export type RunRecord = z.infer<typeof runRecordSchema>;
 
