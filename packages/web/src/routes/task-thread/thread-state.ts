@@ -185,6 +185,8 @@ interface DraftEntry {
 interface DraftTurn {
   id: string
   turnId?: string
+  /** The workflow step/node whose independent session produced this turn. */
+  stepId?: string
   userMessage?: { text: string; imageCount: number; images: string[]; ts?: string }
   startedAt?: string
   entries: DraftEntry[]
@@ -354,10 +356,11 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
   let pendingAsk: ThreadAsk | undefined
   let lastEventAt: string | undefined
 
-  const newTurn = (sourceSeq?: number): DraftTurn => {
+  const newTurn = (sourceSeq?: number, stepId?: string): DraftTurn => {
     turnSeq += 1
     const turn: DraftTurn = {
       id: sourceSeq === undefined ? `turn-fallback-${turnSeq}` : `turn-seq-${sourceSeq}`,
+      ...(stepId !== undefined ? { stepId } : {}),
       entries: [],
       v2Items: false,
     }
@@ -365,6 +368,17 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
     return turn
   }
   const currentTurn = (): DraftTurn => turns.at(-1) ?? newTurn()
+  const turnForEvent = (event: RunEvent): DraftTurn => {
+    const stepId = str(event.stepId)
+    const turnId = str(event.turnId)
+    for (let i = turns.length - 1; i >= 0; i -= 1) {
+      const candidate = turns[i]!
+      if (stepId !== undefined && candidate.stepId !== stepId) continue
+      if (turnId !== undefined && candidate.turnId !== turnId) continue
+      if (stepId !== undefined || turnId !== undefined) return candidate
+    }
+    return currentTurn()
+  }
 
   const itemKey = (event: RunEvent, itemId: string) => {
     return runItemKey(event.stepId, itemId)
@@ -427,12 +441,18 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       }
       case 'turn.started': {
         const turnId = str(event.turnId)
+        const stepId = str(event.stepId)
         const current = turns.at(-1)
         // A v1 `user-message` line precedes the v2 turn.started for the same turn (observed
-        // wire order) — attach rather than opening a duplicate. A turn that already has a v2
-        // identity or v2 items is someone else's; open fresh.
-        const attached = current && current.turnId === undefined && !current.v2Items ? current : newTurn(event.seq)
+        // wire order) — attach rather than opening a duplicate. Graph node sessions can start
+        // concurrently, so only the matching step may claim that unassigned turn; an event for
+        // another step opens its own turn rather than mixing two providers' item ids.
+        const attached = current && current.turnId === undefined && !current.v2Items &&
+          (stepId === undefined || current.stepId === undefined || current.stepId === stepId)
+          ? current
+          : newTurn(event.seq, stepId)
         attached.turnId = turnId
+        if (attached.stepId === undefined && stepId !== undefined) attached.stepId = stepId
         // First stamp wins: when the v1 line opened this turn a moment ago, when the user sent
         // it is the honest start — and the two must not disagree on one turn.
         const startedAt = stamp(event.ts)
@@ -444,8 +464,9 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         // Newest match first (lib is ES2022, so no findLast): per-session turn ids repeat
         // across steps, and a completion always belongs to the most recent turn wearing it.
         let matched: DraftTurn | undefined
+        const stepId = str(event.stepId)
         for (let i = turns.length - 1; i >= 0 && !matched; i -= 1) {
-          if (turns[i]!.turnId === turnId) matched = turns[i]
+          if (turns[i]!.turnId === turnId && (stepId === undefined || turns[i]!.stepId === stepId)) matched = turns[i]
         }
         const turn = matched ?? turns.at(-1)
         if (turn) {
@@ -479,7 +500,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         const item = event.item as unknown as UiItem
         const key = itemKey(event, item.id)
         const located = itemsById.get(key)
-        upsertV2(located?.turn ?? currentTurn(), item, key)
+        upsertV2(located?.turn ?? turnForEvent(event), item, key)
         break
       }
       case 'item.delta': {

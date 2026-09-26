@@ -85,6 +85,38 @@ describe('reduceThread — golden v2 fixtures', () => {
 })
 
 describe('reduceThread — item ids across workflow steps', () => {
+  it('keeps interleaved graph node sessions in their own turns when runner ids repeat', () => {
+    const { turns } = reduceThread([
+      line(1, 'turn.started', { turnId: 'turn_1', stepId: 'security' }),
+      line(2, 'turn.started', { turnId: 'turn_1', stepId: 'accessibility' }),
+      line(3, 'item.started', {
+        item: { kind: 'message', id: 'item_1', role: 'assistant', text: 'Security review.' },
+        stepId: 'security',
+      }),
+      line(4, 'item.started', {
+        item: { kind: 'message', id: 'item_1', role: 'assistant', text: 'Accessibility review.' },
+        stepId: 'accessibility',
+      }),
+      line(5, 'item.completed', {
+        item: { kind: 'message', id: 'item_1', role: 'assistant', text: 'Security review complete.' },
+        stepId: 'security',
+      }),
+      line(6, 'item.completed', {
+        item: { kind: 'message', id: 'item_1', role: 'assistant', text: 'Accessibility review complete.' },
+        stepId: 'accessibility',
+      }),
+      line(7, 'turn.completed', { turnId: 'turn_1', stopReason: 'end_turn', stepId: 'security' }),
+      line(8, 'turn.completed', { turnId: 'turn_1', stopReason: 'end_turn', stepId: 'accessibility' }),
+    ])
+
+    expect(turns).toHaveLength(2)
+    expect(turns.map((turn) => turn.items[0]?.kind === 'message' ? turn.items[0].text : undefined)).toEqual([
+      'Security review complete.',
+      'Accessibility review complete.',
+    ])
+    expect(turns.map((turn) => turn.completed?.stopReason)).toEqual(['end_turn', 'end_turn'])
+  })
+
   it('keeps earlier reasoning when a resumed step restarts its item ids', () => {
     const { turns } = reduceThread([
       line(1, 'turn.started', { turnId: 'turn_1', stepId: 'initial' }),
