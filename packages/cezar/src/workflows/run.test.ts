@@ -1162,7 +1162,7 @@ describe('graph workflows persist visits and route inside one task run', () => {
     ];
     const steps = nodes.map((node) => node.kind === 'check'
       ? { id: node.id, command: node.command }
-      : { id: node.id, prompt: node.prompt, model: node.model, results: node.results });
+      : { id: node.id, prompt: node.prompt, model: 'model' in node ? node.model : undefined, results: node.results });
     const edges = [
       ...reviewIds.map((id) => ({ from: 'fork', to: id, when: 'ready' })),
       ...reviewIds.map((id) => ({ from: id, to: 'join', when: 'done' })),
