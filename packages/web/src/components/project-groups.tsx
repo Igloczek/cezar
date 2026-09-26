@@ -407,7 +407,10 @@ function ProjectGroup({
   )
 
   const waiting = runs.data ? listCounts(runs.data).waiting : 0
-  const buckets = runs.data ? capBuckets(groupRuns(runs.data, view), RECENT_LIMIT) : []
+  const allBuckets = runs.data ? groupRuns(runs.data, view) : []
+  const buckets = capBuckets(allBuckets, RECENT_LIMIT)
+  const hasMoreTasks = allBuckets.reduce((count, bucket) => count + bucket.rows.length, 0) >
+    buckets.reduce((count, bucket) => count + bucket.rows.length, 0)
   // Only the rows this group actually paints: `buckets` is the capped list, so a project with
   // four hundred runs asks about the handful on screen rather than all of them.
   //
@@ -620,16 +623,16 @@ function ProjectGroup({
             />
           </ReferenceStatusProvider>
 
-          {/* Always present, not only past the cap: it is this group's door into the project's
-              tasks pane (`/p/<id>/`), which is worth an affordance even with two tasks listed. */}
-          <Link
-            to={scopeTo(project.id, '/')}
-            onClick={onNavigate}
-            data-slot="project-group-more"
-            className="flex h-9 items-center rounded-md px-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground md:h-7"
-          >
-            More…
-          </Link>
+          {hasMoreTasks ? (
+            <Link
+              to={scopeTo(project.id, '/')}
+              onClick={onNavigate}
+              data-slot="project-group-more"
+              className="flex h-9 items-center rounded-md px-3 text-[12px] text-muted-foreground transition-colors hover:text-foreground md:h-7"
+            >
+              More…
+            </Link>
+          ) : null}
         </div>
       )}
     </div>

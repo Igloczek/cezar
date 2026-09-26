@@ -152,6 +152,24 @@ describe('ProjectGroups', () => {
     expect(more.getAttribute('href')).toBe('/p/cezar/')
   })
 
+  it('hides More… when the project has no tasks beyond the rows shown', async () => {
+    serve({ '/api/v1/p/cezar/runs': [run(), run(), run()] })
+    renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
+
+    await waitFor(() => expect(taskLinks('cezar')).toHaveLength(3))
+    expect(group('cezar').querySelector('[data-slot="project-group-more"]')).toBeNull()
+  })
+
+  it('hides More… when the project has no tasks', async () => {
+    serve({ '/api/v1/p/cezar/runs': [] })
+    renderGroups([project(), project({ id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' })])
+
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some((call) => String(call[0]) === '/api/v1/p/cezar/runs')).toBe(true),
+    )
+    expect(group('cezar').querySelector('[data-slot="project-group-more"]')).toBeNull()
+  })
+
   it('orders groups by lastOpenedAt and only fetches the expanded one', async () => {
     serve({ '/api/v1/p/cezar/runs': [] })
     renderGroups([
