@@ -251,6 +251,9 @@ export const workspaceUiStateSchema = z.looseObject({
    *  cockpit keeps it in localStorage (`packages/web/src/lib/last-location.ts`): stored here, the
    *  last client to navigate decided where every OTHER client's next launch landed. */
   lastLocation: workspaceLastLocationSchema.optional(),
+  /** Legacy source for default team-skill selections. New choices are project-scoped; this stays
+   *  typed so projects without a local choice preserve selections from older cockpit versions. */
+  importedSkills: z.array(z.string()).optional(),
 });
 export type WorkspaceUiState = z.infer<typeof workspaceUiStateSchema>;
 
@@ -290,6 +293,7 @@ export const setWorkspaceUiStateInputSchema = z
         pi: z.string().min(1).max(128).optional(),
       })
       .optional(),
+    importedSkills: z.array(z.string().min(1).max(200)).max(WORKSPACE_UI_STATE_MAX_KEYS).optional(),
     taskTable: taskTableUiStateSchema
       .extend({
         expandedColumns: z
