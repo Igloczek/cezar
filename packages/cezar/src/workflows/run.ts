@@ -3082,7 +3082,7 @@ export class RunManager {
       .map((b) => b.text)
       .join('\n');
     const slashSkill = userAuthored ? registrySlashSkill(text, state.skills ?? [])?.skill : undefined;
-    if (slashSkill?.source === 'team' && slashSkill.team?.dir && preparedTeamSkillDir === undefined) {
+    if (slashSkill?.source === 'team' && slashSkill.team && preparedTeamSkillDir === undefined) {
       // Live messages have a synchronous acceptance API. Prepare companion files
       // before delivery, then use the same path as opening and continuation turns.
       void materializeSkillDir(state.cwd, slashSkill)
@@ -4144,7 +4144,7 @@ export class RunManager {
         // describe the work — and therefore derive a useful title (#432).
         // Directory team skills (SKILL.md + references/) get materialized
         // under Cezar's ignored run data; every backend receives its absolute path.
-        if (skill.source === 'team' && skill.team?.dir) {
+        if (skill.source === 'team' && skill.team) {
           selectedSkillDir = (await materializeSkillDir(state.cwd, skill).catch(() => null)) ?? undefined;
           if (selectedSkillDir) {
             emit({
@@ -5302,7 +5302,7 @@ async function materializeSlashTeamSkill(
   skills: readonly Skill[],
 ): Promise<string | undefined> {
   const skill = registrySlashSkill(text, skills)?.skill;
-  if (skill?.source !== 'team' || !skill.team?.dir) return undefined;
+  if (skill?.source !== 'team' || !skill.team) return undefined;
   return (await materializeSkillDir(cwd, skill).catch(() => null)) ?? undefined;
 }
 

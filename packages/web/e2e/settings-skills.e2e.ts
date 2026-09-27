@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -8,7 +8,7 @@ import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
  * Settings → Skills (R6 Step 1.4) end-to-end against the shared dry-run environment.
  *
  * Reachability: fully reachable. The server discovers skills fresh on every GET, so the
- * suite seeds two real project skills into this worktree's `.ai/skills/` (removed in
+ * suite seeds two real project skills into this worktree's `.agents/skills/` (removed in
  * afterAll) — the catalog renders them bold and first (#377) next to whatever global skills
  * the host machine genuinely has. Refresh hits the real POST (no team repos configured in
  * dry-run → a fast no-op fetch answering the same catalog), which is exactly the #384
@@ -20,13 +20,12 @@ const sessionId = `e2e-settings-skills-${process.pid}`
 
 const DESKTOP = { width: 1440, height: 900 }
 
-const skillsDir = resolve(import.meta.dirname, '../../../.ai/skills')
+const skillsDir = resolve(import.meta.dirname, '../../../.agents/skills')
 const ALPHA = 'e2e-alpha-skill'
 const BETA = 'e2e-beta-skill'
 
 let browser: AgentBrowser
 let baseUrl: string
-let createdSkillsDir = false
 let bootProject: string
 
 /** A flat route target under this server's own project prefix (multi-project spec, step 3.2):
@@ -36,15 +35,15 @@ const scoped = (path: string) => `/p/${bootProject}${path}`
 beforeAll(async () => {
   baseUrl = readTestEnv().baseUrl
   bootProject = await bootProjectId(baseUrl)
-  createdSkillsDir = !existsSync(skillsDir)
-  mkdirSync(skillsDir, { recursive: true })
+  mkdirSync(resolve(skillsDir, ALPHA), { recursive: true })
+  mkdirSync(resolve(skillsDir, BETA), { recursive: true })
   writeFileSync(
-    resolve(skillsDir, `${ALPHA}.md`),
+    resolve(skillsDir, ALPHA, 'SKILL.md'),
     `---\nname: ${ALPHA}\ndescription: An e2e-seeded project skill\n---\n\n# Alpha skill\n\nDo the alpha thing.\n`,
     'utf8',
   )
   writeFileSync(
-    resolve(skillsDir, `${BETA}.md`),
+    resolve(skillsDir, BETA, 'SKILL.md'),
     `---\nname: ${BETA}\ndescription: The second seeded skill\n---\n\nDo the beta thing.\n`,
     'utf8',
   )
@@ -54,9 +53,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   // Never leave test skills in a developer's catalog.
-  rmSync(resolve(skillsDir, `${ALPHA}.md`), { force: true })
-  rmSync(resolve(skillsDir, `${BETA}.md`), { force: true })
-  if (createdSkillsDir) rmSync(skillsDir, { recursive: true, force: true })
+  rmSync(resolve(skillsDir, ALPHA), { recursive: true, force: true })
+  rmSync(resolve(skillsDir, BETA), { recursive: true, force: true })
   browser?.close()
 })
 

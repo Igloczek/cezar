@@ -238,31 +238,12 @@ async function resolveRef(bareDir: string, ref: string): Promise<string | null> 
   return null;
 }
 
-// ---- skill discovery (three conventions) --------------------------------------
+// ---- skill discovery -----------------------------------------------------------
 
-interface SkillPathHit {
-  /** null → the name comes from the file's frontmatter (markdown convention). */
-  name: string | null;
-  kind: 'skill' | 'command' | 'markdown';
-}
-
-/**
- * Match the janitor conventions plus our own:
- *  - `**\/SKILL.md`          → skill named after the parent directory (with references/)
- *  - `**\/commands/<n>.md`   → skill `<n>`
- *  - `.ai/skills/**\/*.md` or `.ai/cezar/skills/**\/*.md` → frontmatter/basename name
- */
-function matchSkillPath(line: string): SkillPathHit | null {
-  if (line === 'SKILL.md' || line.endsWith('/SKILL.md')) {
-    const parts = line.split('/');
-    if (parts.length < 2) return null;
-    const parent = parts[parts.length - 2];
-    return parent && parent !== '.' ? { name: parent, kind: 'skill' } : null;
-  }
-  const cmd = /(?:^|\/)commands\/([^/]+)\.md$/.exec(line);
-  if (cmd) return { name: cmd[1] as string, kind: 'command' };
-  if (/(?:^|\/)\.ai\/(?:cezar\/)?skills\/.+\.md$/.test(line)) return { name: null, kind: 'markdown' };
-  return null;
+function skillNameFromPath(path: string): string | null {
+  if (!path.endsWith('/SKILL.md')) return null;
+  const name = basename(dirname(path));
+  return name && name !== '.' ? name : null;
 }
 
 /**
@@ -303,16 +284,11 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
   const seen = new Set<string>();
   for (const line of ls.stdout.split('\n')) {
     if (!line) continue;
-    const hit = matchSkillPath(line);
-    if (!hit) continue;
+    const name = skillNameFromPath(line);
+    if (!name) continue;
     const raw = await readRemoteSkill(src, line, commit);
     if (raw === null) continue;
     const { frontmatter, body } = parseFrontmatter(raw);
-    const name =
-      hit.name ??
-      (typeof frontmatter.name === 'string' && frontmatter.name.trim()
-        ? frontmatter.name.trim()
-        : basename(line, '.md'));
     if (seen.has(name)) continue;
     seen.add(name);
     const description =
@@ -325,7 +301,7 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
       body,
       path: `${src.repo}@${src.ref}:${line}`,
       source: 'team',
-      team: { repo: src.repo, ref: src.ref, path: line, dir: hit.kind === 'skill', commit },
+      team: { repo: src.repo, ref: src.ref, path: line, commit },
     });
   }
   return skills;
@@ -338,11 +314,11 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
  * `<repoRoot>/.ai/cezar/tmp/skills/<name>/`. Cezar passes that absolute path
  * to any backend, so no agent-specific installation or symlinks are needed.
  * Keep it out of the user's git via `.git/info/exclude`. Returns the directory, or null
- * when there is nothing to materialize (not a directory skill, no clone…).
+ * when there is nothing to materialize (no clone…).
  */
 export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<string | null> {
   if (
-    !skill.team?.dir ||
+    !skill.team ||
     !skill.team.path.endsWith('SKILL.md') ||
     !skill.name ||
     skill.name === '.' ||

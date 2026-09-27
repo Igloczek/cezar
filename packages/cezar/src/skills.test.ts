@@ -29,12 +29,12 @@ function teamSkill(name: string, repo: string): Skill {
     body: `${name} body`,
     path: `${repo}@main:${name}/SKILL.md`,
     source: 'team',
-    team: { repo, ref: 'main', path: `${name}/SKILL.md`, dir: true },
+    team: { repo, ref: 'main', path: `${name}/SKILL.md` },
   };
 }
 
 function localSkill(name: string): Skill {
-  return { name, body: `${name} body`, path: `/repo/.ai/cezar/skills/${name}.md`, source: 'cezar' };
+  return { name, body: `${name} body`, path: `/repo/.future/skills/${name}/SKILL.md`, source: 'project' };
 }
 
 describe('readImportedSkills', () => {
@@ -105,15 +105,17 @@ describe('discoverSkills local entrypoints', () => {
   it('recognizes only scalar true as the interactive composer hint', async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), 'cezar-skills-'));
     tempDirs.push(repoRoot);
-    const skillsDir = join(repoRoot, '.ai/cezar/skills');
-    await mkdir(skillsDir, { recursive: true });
-    await writeFile(join(skillsDir, 'true.md'), '---\r\ninteractive: "true"\r\n---\r\nBody');
-    await writeFile(join(skillsDir, 'false.md'), '---\ninteractive: false\n---\nBody');
-    await writeFile(join(skillsDir, 'array.md'), '---\ninteractive: [true]\n---\nBody');
-    await writeFile(join(skillsDir, 'yes.md'), '---\ninteractive: yes\n---\nBody');
-    await writeFile(join(skillsDir, 'missing.md'), 'Body');
+    const skillsDir = join(repoRoot, '.future/skills');
+    for (const name of ['true', 'false', 'array', 'yes', 'missing']) {
+      await mkdir(join(skillsDir, name), { recursive: true });
+    }
+    await writeFile(join(skillsDir, 'true/SKILL.md'), '---\r\ninteractive: "true"\r\n---\r\nBody');
+    await writeFile(join(skillsDir, 'false/SKILL.md'), '---\ninteractive: false\n---\nBody');
+    await writeFile(join(skillsDir, 'array/SKILL.md'), '---\ninteractive: [true]\n---\nBody');
+    await writeFile(join(skillsDir, 'yes/SKILL.md'), '---\ninteractive: yes\n---\nBody');
+    await writeFile(join(skillsDir, 'missing/SKILL.md'), 'Body');
 
-    const skills = (await discoverSkills(repoRoot)).filter((skill) => skill.source === 'cezar');
+    const skills = (await discoverSkills(repoRoot)).filter((skill) => skill.source === 'project');
     expect(skills.find((skill) => skill.name === 'true')).toMatchObject({
       interactive: true,
       body: 'Body',
@@ -123,21 +125,24 @@ describe('discoverSkills local entrypoints', () => {
     }
   });
 
-  it('keeps flat and SKILL.md skills while excluding nested reference files', async () => {
+  it('reads SKILL.md and ignores loose Markdown and Cezar-only directories', async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), 'cezar-skills-'));
     tempDirs.push(repoRoot);
-    const skillsDir = join(repoRoot, '.ai/cezar/skills');
+    const skillsDir = join(repoRoot, '.future/skills');
     await mkdir(join(skillsDir, 'om-example/references'), { recursive: true });
     await mkdir(join(skillsDir, 'legacy/nested'), { recursive: true });
+    await mkdir(join(repoRoot, '.ai/skills/old-dir'), { recursive: true });
+    await mkdir(join(repoRoot, '.ai/cezar/skills'), { recursive: true });
     await writeFile(join(skillsDir, 'flat.md'), '# Flat skill');
     await writeFile(join(skillsDir, 'legacy/nested/legacy.md'), '# Legacy skill');
     await writeFile(join(skillsDir, 'om-example/SKILL.md'), '# Example skill');
     await writeFile(join(skillsDir, 'om-example/references/agentic-setup.md'), '# Supporting doc');
+    await writeFile(join(repoRoot, '.ai/skills/old-dir/SKILL.md'), '# Old location');
+    await writeFile(join(repoRoot, '.ai/cezar/skills/old.md'), '# Old file');
 
-    const skills = (await discoverSkills(repoRoot)).filter((skill) => skill.source === 'cezar');
+    const skills = (await discoverSkills(repoRoot)).filter((skill) => skill.path.startsWith(repoRoot));
 
-    expect(skills.map((skill) => skill.name)).toEqual(['flat', 'legacy', 'om-example']);
-    expect(skills.some((skill) => skill.name === 'agentic-setup')).toBe(false);
+    expect(skills.map((skill) => skill.name)).toEqual(['om-example']);
   });
 
   it('follows linked skill directories and deduplicates them by skill name', async () => {
@@ -153,7 +158,7 @@ describe('discoverSkills local entrypoints', () => {
     const skills = (await discoverSkills(repoRoot)).filter((skill) => skill.name === 'om-example');
 
     expect(skills).toHaveLength(1);
-    expect(skills[0]?.source).toBe('agents');
+    expect(skills[0]?.source).toBe('project');
   });
 
   it('discovers installed skills without knowing the agent name', async () => {
@@ -165,7 +170,7 @@ describe('discoverSkills local entrypoints', () => {
 
     const skills = await discoverSkills(repoRoot);
     expect(skills.find((skill) => skill.name === 'my-skill')).toMatchObject({
-      source: 'agents',
+      source: 'project',
       path: join(skillsDir, 'SKILL.md'),
     });
   });
@@ -197,8 +202,8 @@ describe('discoverSkills local entrypoints', () => {
     const home = await mkdtemp(join(tmpdir(), 'cezar-home-'));
     tempDirs.push(repoRoot, home);
     const locations = [
-      [join(repoRoot, 'skills/root-skill'), 'root-skill', 'agents'],
-      [join(repoRoot, 'agent/subagents/future/skills/sub-skill'), 'sub-skill', 'agents'],
+      [join(repoRoot, 'skills/root-skill'), 'root-skill', 'project'],
+      [join(repoRoot, 'agent/subagents/future/skills/sub-skill'), 'sub-skill', 'project'],
       [join(home, '.odd/assistant/skills/home-skill'), 'home-skill', 'global'],
       [join(home, '.config/future/harness/skills/config-skill'), 'config-skill', 'global'],
       [join(home, 'custom-config/future/skills/xdg-skill'), 'xdg-skill', 'global'],
@@ -277,10 +282,10 @@ describe('the built-in create-cezar-automation skill', () => {
     const repoRoot = await emptyRepo();
     process.env.CEZ_AUTOMATIONS = '1';
     process.env.CEZ_API_URL = 'http://127.0.0.1:4321';
-    await mkdir(join(repoRoot, '.ai/skills'), { recursive: true });
-    await writeFile(join(repoRoot, '.ai/skills/create-cezar-automation.md'), '---\nname: create-cezar-automation\n---\nHouse version');
+    await mkdir(join(repoRoot, '.future/skills/create-cezar-automation'), { recursive: true });
+    await writeFile(join(repoRoot, '.future/skills/create-cezar-automation/SKILL.md'), '---\nname: create-cezar-automation\n---\nHouse version');
     const matches = (await discoverSkills(repoRoot)).filter((s) => s.name === 'create-cezar-automation');
     expect(matches).toHaveLength(1);
-    expect(matches[0]).toMatchObject({ source: 'ai', body: 'House version' });
+    expect(matches[0]).toMatchObject({ source: 'project', body: 'House version' });
   });
 });

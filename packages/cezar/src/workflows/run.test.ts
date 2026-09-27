@@ -2541,9 +2541,9 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
-    mkdirSync(join(repoRoot, '.ai/cezar/skills'), { recursive: true });
+    mkdirSync(join(repoRoot, '.future/skills/demo-review'), { recursive: true });
     writeFileSync(
-      join(repoRoot, '.ai/cezar/skills/demo-review.md'),
+      join(repoRoot, '.future/skills/demo-review/SKILL.md'),
       '---\nname: demo-review\ndescription: Review a diff.\n---\n\nRun the demo review playbook.\n',
     );
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
@@ -2665,9 +2665,9 @@ describe("registry /skill expansion on a fresh run's opening prompt (#278)", () 
     writeFileSync(join(repoRoot, 'a.txt'), 'one\n');
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
-    mkdirSync(join(repoRoot, '.ai/cezar/skills'), { recursive: true });
+    mkdirSync(join(repoRoot, '.future/skills/demo-review'), { recursive: true });
     writeFileSync(
-      join(repoRoot, '.ai/cezar/skills/demo-review.md'),
+      join(repoRoot, '.future/skills/demo-review/SKILL.md'),
       '---\nname: demo-review\ndescription: Review a diff.\n---\n\nRun the demo review playbook.\n',
     );
     store = RunStore.open(join(repoRoot, '.ai/cezar'));

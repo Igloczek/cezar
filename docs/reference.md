@@ -25,7 +25,7 @@ Three words, no jargon — **task**, **skill**, **chain**:
   screenshots, PDFs, `.txt` or `.md` files to the task (paperclip, ⌘V or drag-drop;
   the agent gets each one as a real file on disk), or send follow-up messages into
   the live session while it works.
-- 📖 **Skills** are Markdown playbooks. Cezar finds skills already installed for
+- 📖 **Skills** are `SKILL.md` playbooks. Cezar finds skills already installed for
   coding agents in the project or your home, or pulls them from a shared **team skills repo**
   (a bare git clone cached globally in `~/.cache/cez/`).
   A workflow step references one by `skill: <name>` and its body becomes the

@@ -1,15 +1,15 @@
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve, basename, dirname, extname, isAbsolute } from 'node:path';
+import { join, basename, dirname, isAbsolute } from 'node:path';
 import { gatedSkillsRepos } from './config.ts';
 import { getTeamSkillsCached } from './skills-remote.ts';
 import { readWorkspaceUiState } from './workspace/ui-state.ts';
 import { builtinSkills } from './automations/builtin-skill.ts';
 
 /**
- * A skill is a Markdown file with optional YAML-ish frontmatter (`name`,
+ * A skill is a SKILL.md file with optional YAML-ish frontmatter (`name`,
  * `description`). Discovered from existing `skills` directories in the
- * project or home, older Cezar directories, and configured team skills repos
+ * project or home and configured team skills repos
  * (spec 005 — bare clones, no checkout).
  * Adapted from @cezar/core's skill-catalog.
  */
@@ -22,25 +22,16 @@ export interface Skill {
   path: string;
   /** `builtin` is the one skill cezar ships itself (`create-cezar-automation`, spec
    *  2026-09-13-automations-from-prompt) — listed last, and only while automations are reachable. */
-  source: 'ai' | 'cezar' | 'agents' | 'global' | 'team' | 'builtin';
+  source: 'project' | 'global' | 'team' | 'builtin';
   /** Team skills only: where the definition lives in its skills repo. */
   team?: {
     repo: string;
     ref: string;
     path: string;
-    /** True for the `SKILL.md` convention — a whole directory (references/…). */
-    dir: boolean;
     /** The exact commit `ref` resolved to when the skill was read (#428). */
     commit?: string;
   };
 }
-
-/* Older Cezar skill locations remain readable. Installed agent skills are
-   discovered from the filesystem without a list of agent names. */
-const SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
-  { dir: '.ai/cezar/skills', source: 'cezar' },
-  { dir: '.ai/skills', source: 'ai' },
-];
 
 /** Find existing `skills` directories without knowing which agent owns them. */
 async function findSkillDirs(
@@ -104,8 +95,7 @@ async function globalSkillDirs(): Promise<string[]> {
 
 /**
  * Discover the merged skill catalog for a repo. Name collisions resolve
- * local-first: `.ai/cezar/skills` → `.ai/skills` → installed project skills
- * → installed global skills → team repo
+ * local-first: installed project skills → installed global skills → team repo
  * ("the user's repo is the source of truth"). Missing directories are fine —
  * an empty catalog is fully supported (steps fall back to their plain
  * prompt). Team skills come from the in-process cache; the first call starts
@@ -133,9 +123,8 @@ export async function discoverSkills(repoRoot: string): Promise<Skill[]> {
   const globalDirs = await globalSkillDirs();
   const [lists, gatedRepos, uiState] = await Promise.all([
     Promise.all([
-      ...SKILL_DIRS.map(({ dir, source }) => readMarkdownSkills(resolve(repoRoot, dir), source)),
-      ...projectSkillDirs.map((dir) => readMarkdownSkills(dir, 'agents')),
-      ...globalDirs.map((dir) => readMarkdownSkills(dir, 'global')),
+      ...projectSkillDirs.map((dir) => readSkillFiles(dir, 'project')),
+      ...globalDirs.map((dir) => readSkillFiles(dir, 'global')),
     ]),
     gatedSkillsRepos(repoRoot),
     readWorkspaceUiState(),
@@ -196,8 +185,7 @@ export function filterImportedTeamSkills(
 /**
  * Walk a skills dir for entrypoints, following directory symlinks. Once a
  * directory contains `SKILL.md`, it is one directory-based skill and its
- * supporting Markdown (for example `references/*.md`) is not scanned. Other
- * directories retain the legacy recursive `*.md` discovery behavior.
+ * supporting Markdown (for example `references/*.md`) is not scanned.
  */
 async function skillEntryPaths(
   dir: string,
@@ -243,14 +231,12 @@ async function skillEntryPaths(
     }
     if (isDir) {
       paths.push(...(await skillEntryPaths(path, depth - 1, visited)));
-    } else if (extname(entry.name).toLowerCase() === '.md') {
-      paths.push(path);
     }
   }
   return paths;
 }
 
-async function readMarkdownSkills(dir: string, source: Skill['source']): Promise<Skill[]> {
+async function readSkillFiles(dir: string, source: Skill['source']): Promise<Skill[]> {
   const paths = await skillEntryPaths(dir, 4, new Set());
   const skills: Skill[] = [];
   for (const absPath of paths) {
@@ -261,9 +247,7 @@ async function readMarkdownSkills(dir: string, source: Skill['source']): Promise
       continue;
     }
     const { frontmatter, body } = parseFrontmatter(raw);
-    const base = basename(absPath, extname(absPath));
-    // The `SKILL.md` convention names the skill after its directory.
-    const fallback = base.toLowerCase() === 'skill' ? basename(dirname(absPath)) : base;
+    const fallback = basename(dirname(absPath));
     const name =
       typeof frontmatter.name === 'string' && frontmatter.name.trim()
         ? frontmatter.name.trim()

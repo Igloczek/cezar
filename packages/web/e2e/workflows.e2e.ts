@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { parse } from 'yaml'
@@ -9,7 +9,7 @@ import { AgentBrowser, readTestEnv } from './agent-browser'
  * The workflow builder (R6 Step 1.6) end-to-end against the shared dry-run environment.
  *
  * Reachability: fully reachable. The server discovers skills fresh on every GET, so the suite
- * seeds two real project skills into this worktree's `.ai/skills/` (removed in afterAll) and
+ * seeds two real project skills into this worktree's `.agents/skills/` (removed in afterAll) and
  * builds a small workflow from them: palette → canvas adds, the YAML preview, Save (a real
  * file lands in `.ai/cezar/workflows/`, read back and parsed here), keyboard reorder through
  * dnd-kit's defaults, Import through the server's `/api/v1/workflows/parse`, and the 8-step
@@ -22,7 +22,7 @@ const sessionId = `e2e-workflows-${process.pid}`
 const DESKTOP = { width: 1440, height: 900 }
 
 const repoRoot = resolve(import.meta.dirname, '../../..')
-const skillsDir = resolve(repoRoot, '.ai/skills')
+const skillsDir = resolve(repoRoot, '.agents/skills')
 const ALPHA = 'e2e-wb-alpha'
 const BETA = 'e2e-wb-beta'
 const FLOW = 'e2e-wb-flow'
@@ -30,21 +30,20 @@ const savedFlowPath = resolve(repoRoot, `.ai/cezar/workflows/${FLOW}.yaml`)
 
 let browser: AgentBrowser
 let baseUrl: string
-let createdSkillsDir = false
 
 beforeAll(() => {
   baseUrl = readTestEnv().baseUrl
   // A crashed earlier run may have left the saved flow behind — Save would then 409.
   rmSync(savedFlowPath, { force: true })
-  createdSkillsDir = !existsSync(skillsDir)
-  mkdirSync(skillsDir, { recursive: true })
+  mkdirSync(resolve(skillsDir, ALPHA), { recursive: true })
+  mkdirSync(resolve(skillsDir, BETA), { recursive: true })
   writeFileSync(
-    resolve(skillsDir, `${ALPHA}.md`),
+    resolve(skillsDir, ALPHA, 'SKILL.md'),
     `---\nname: ${ALPHA}\ndescription: First e2e-seeded skill\n---\n\nDo the alpha thing.\n`,
     'utf8',
   )
   writeFileSync(
-    resolve(skillsDir, `${BETA}.md`),
+    resolve(skillsDir, BETA, 'SKILL.md'),
     `---\nname: ${BETA}\ndescription: Second e2e-seeded skill\n---\n\nDo the beta thing.\n`,
     'utf8',
   )
@@ -54,9 +53,8 @@ beforeAll(() => {
 
 afterAll(() => {
   // Never leave test skills or test workflow files in a developer's repo.
-  rmSync(resolve(skillsDir, `${ALPHA}.md`), { force: true })
-  rmSync(resolve(skillsDir, `${BETA}.md`), { force: true })
-  if (createdSkillsDir) rmSync(skillsDir, { recursive: true, force: true })
+  rmSync(resolve(skillsDir, ALPHA), { recursive: true, force: true })
+  rmSync(resolve(skillsDir, BETA), { recursive: true, force: true })
   rmSync(savedFlowPath, { force: true })
   browser?.close()
 })

@@ -32,7 +32,7 @@ const HEALTH: HealthResponse = {
 }
 
 const SKILLS: Skill[] = [
-  { name: 'om-fix', body: '', path: '.ai/skills/om-fix.md', source: 'ai' },
+  { name: 'om-fix', body: '', path: '.agents/skills/om-fix/SKILL.md', source: 'project' },
 ]
 
 function serve(routes: Record<string, unknown>): void {

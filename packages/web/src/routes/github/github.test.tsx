@@ -139,7 +139,7 @@ const WORKFLOWS: WorkflowsResponse = {
 // Server order is global-first ON PURPOSE: the dropdown must reorder project-first (#377).
 const SKILLS: Skill[] = [
   { name: 'g-review', description: 'global review', body: '', path: '/g/g-review.md', source: 'global' },
-  { name: 'om-fix', description: 'project fixer', body: '', path: '/p/om-fix.md', source: 'ai' },
+  { name: 'om-fix', description: 'project fixer', body: '', path: '/p/om-fix.md', source: 'project' },
   { name: 'team-x', description: 'team skill', body: '', path: '/t/team-x.md', source: 'team' },
 ]
 

@@ -63,21 +63,23 @@ beforeAll(async () => {
   // Skills chosen so the SERVER order (`auto-review-pr`, `review`, `ship` — the directory
   // listing) is the inverse of the desired MATCH order for the query "review": the exact-name
   // `review` must jump to the top past `auto-review-pr`. An unranked list would leave it last.
-  mkdirSync(join(dataRoot, '.ai/skills'), { recursive: true })
+  for (const name of ['auto-review-pr', 'review', 'ship']) {
+    mkdirSync(join(dataRoot, '.agents/skills', name), { recursive: true })
+  }
   writeFileSync(
-    join(dataRoot, '.ai/skills/auto-review-pr.md'),
+    join(dataRoot, '.agents/skills/auto-review-pr/SKILL.md'),
     // The two rare tokens let the multi-keyword spec assert a UNIQUE match that the machine's
     // global om-* skills (also listed in the picker) cannot accidentally satisfy.
     '---\ndescription: Open and merge a pull request zebratoken quokkatoken\n---\n\nReview and merge.\n',
     'utf8',
   )
   writeFileSync(
-    join(dataRoot, '.ai/skills/review.md'),
+    join(dataRoot, '.agents/skills/review/SKILL.md'),
     '---\ndescription: The exact match target\n---\n\nJust review.\n',
     'utf8',
   )
   writeFileSync(
-    join(dataRoot, '.ai/skills/ship.md'),
+    join(dataRoot, '.agents/skills/ship/SKILL.md'),
     '---\ndescription: Deploy the build\n---\n\nShip it.\n',
     'utf8',
   )

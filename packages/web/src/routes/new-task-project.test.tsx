@@ -115,10 +115,10 @@ const PROVIDERS: ProviderStatusResponse = {
 
 /** Each project ships its OWN skills — the pill's whole promise. */
 const BOOT_SKILLS: Skill[] = [
-  { name: 'om-fix', description: 'Fix an issue end to end', body: '', path: '/p/om-fix.md', source: 'ai' },
+  { name: 'om-fix', description: 'Fix an issue end to end', body: '', path: '/p/om-fix.md', source: 'project' },
 ]
 const OTHER_SKILLS: Skill[] = [
-  { name: 'ship-storefront', description: 'Deploy the storefront', body: '', path: '/p/ship.md', source: 'ai' },
+  { name: 'ship-storefront', description: 'Deploy the storefront', body: '', path: '/p/ship.md', source: 'project' },
 ]
 
 const BOOT_WORKFLOWS: WorkflowsResponse = {

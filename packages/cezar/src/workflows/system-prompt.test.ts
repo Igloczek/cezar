@@ -152,9 +152,9 @@ describe('systemPrompt end-to-end (dry run)', () => {
     await run('git', ['add', '-A'], { cwd: repoRoot });
     await run('git', [...GIT_ID, 'commit', '-q', '-m', 'base'], { cwd: repoRoot });
     mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
-    mkdirSync(join(repoRoot, '.ai/skills/om-auto-review-pr'), { recursive: true });
+    mkdirSync(join(repoRoot, '.future/skills/om-auto-review-pr'), { recursive: true });
     writeFileSync(
-      join(repoRoot, '.ai/skills/om-auto-review-pr/SKILL.md'),
+      join(repoRoot, '.future/skills/om-auto-review-pr/SKILL.md'),
       `---\nname: om-auto-review-pr\ndescription: ${SKILL_DESCRIPTION}\n---\n${SKILL_BODY}\n`,
       'utf8',
     );
@@ -462,8 +462,8 @@ describe('systemPrompt end-to-end (dry run)', () => {
       // The runner passes the full discovered skill, so the prompt carries the
       // absolute path of the installed copy (read from the MAIN repo even in a
       // worktree). Mirror that here so the expected prompt matches.
-      path: join(repoRoot, '.ai/skills/om-auto-review-pr/SKILL.md'),
-      source: 'ai',
+      path: join(repoRoot, '.future/skills/om-auto-review-pr/SKILL.md'),
+      source: 'project',
     });
     expect(capturedSystemPrompt()).toBe(
       composeSystemPrompt(skillPrompt, CONFIG_PROMPT, HANDOFF_INSTRUCTIONS),

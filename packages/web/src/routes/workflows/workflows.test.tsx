@@ -18,8 +18,8 @@ afterEach(() => {
 // ---- fixtures ----------------------------------------------------------------------------------
 
 const SKILLS: Skill[] = [
-  { name: 'om-fix', description: 'Fix the thing', body: '', path: '.ai/skills/om-fix.md', source: 'ai' },
-  { name: 'om-review', description: 'Review it', body: '', path: '~/.cez/skills/om-review.md', source: 'global' },
+  { name: 'om-fix', description: 'Fix the thing', body: '', path: '.agents/skills/om-fix/SKILL.md', source: 'project' },
+  { name: 'om-review', description: 'Review it', body: '', path: '/home/u/.codex/skills/om-review/SKILL.md', source: 'global' },
 ]
 
 const QUICK: WorkflowDef = {

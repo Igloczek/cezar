@@ -22,10 +22,10 @@ import {
 
 const check = (name: BackendCheck['name'], available: boolean): BackendCheck => ({ name, available })
 
-const skill = (name: string, source: Skill['source'] = 'ai'): Skill => ({
+const skill = (name: string, source: Skill['source'] = 'project'): Skill => ({
   name,
   body: '',
-  path: `/skills/${name}.md`,
+  path: `/skills/${name}/SKILL.md`,
   source,
 })
 

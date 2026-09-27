@@ -63,9 +63,9 @@ beforeAll(async () => {
   writeFileSync(join(dataRoot, 'README.md'), '# plan-mode e2e fixture repo\n', 'utf8')
   git('add', '.')
   git('commit', '-qm', 'init')
-  mkdirSync(join(dataRoot, '.ai/skills'), { recursive: true })
+  mkdirSync(join(dataRoot, '.agents/skills/lint-fix'), { recursive: true })
   writeFileSync(
-    join(dataRoot, '.ai/skills/lint-fix.md'),
+    join(dataRoot, '.agents/skills/lint-fix/SKILL.md'),
     '---\ndescription: Fix lint findings\n---\n\nRun the linter and fix everything.\n',
     'utf8',
   )

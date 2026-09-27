@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
@@ -9,7 +9,7 @@ import { AgentBrowser, readTestEnv } from './agent-browser'
  *
  * Reachability: fully reachable. The generator needs only the skills catalog (discovered
  * fresh on every GET, so the suite seeds two real project skills into this worktree's
- * `.ai/skills/` and removes them in afterAll) and the launch-key route. Nothing here
+ * `.agents/skills/` and removes them in afterAll) and the launch-key route. Nothing here
  * executes a `javascript:` URL — the page is a drag source only (spec 011 §5), so the specs
  * assert on the generated `href`, which is exactly what a user would drag to their bar.
  *
@@ -29,13 +29,12 @@ const sessionId = `e2e-settings-bookmarklets-${process.pid}`
 
 const DESKTOP = { width: 1440, height: 900 }
 
-const skillsDir = resolve(import.meta.dirname, '../../../.ai/skills')
+const skillsDir = resolve(import.meta.dirname, '../../../.agents/skills')
 const ALPHA = 'e2e-bm-alpha-skill'
 const BETA = 'e2e-bm-beta-skill'
 
 let browser: AgentBrowser
 let baseUrl: string
-let createdSkillsDir = false
 /** The id the running server registered this checkout under — what its URLs and its generated
  *  bookmarklets must name, and where every legacy flat URL redirects. */
 let bootProject = ''
@@ -65,15 +64,15 @@ beforeAll(async () => {
   bootProject = ((await (await fetch(`${baseUrl}/api/v1/projects`)).json()) as { bootProject: string })
     .bootProject
   expect(bootProject).toBeTruthy()
-  createdSkillsDir = !existsSync(skillsDir)
-  mkdirSync(skillsDir, { recursive: true })
+  mkdirSync(resolve(skillsDir, ALPHA), { recursive: true })
+  mkdirSync(resolve(skillsDir, BETA), { recursive: true })
   writeFileSync(
-    resolve(skillsDir, `${ALPHA}.md`),
+    resolve(skillsDir, ALPHA, 'SKILL.md'),
     `---\nname: ${ALPHA}\ndescription: An e2e-seeded project skill\n---\n\nDo the alpha thing.\n`,
     'utf8',
   )
   writeFileSync(
-    resolve(skillsDir, `${BETA}.md`),
+    resolve(skillsDir, BETA, 'SKILL.md'),
     `---\nname: ${BETA}\ndescription: The second seeded skill\n---\n\nDo the beta thing.\n`,
     'utf8',
   )
@@ -83,9 +82,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   // Never leave test skills in a developer's catalog.
-  rmSync(resolve(skillsDir, `${ALPHA}.md`), { force: true })
-  rmSync(resolve(skillsDir, `${BETA}.md`), { force: true })
-  if (createdSkillsDir) rmSync(skillsDir, { recursive: true, force: true })
+  rmSync(resolve(skillsDir, ALPHA), { recursive: true, force: true })
+  rmSync(resolve(skillsDir, BETA), { recursive: true, force: true })
   browser?.close()
 })
 
