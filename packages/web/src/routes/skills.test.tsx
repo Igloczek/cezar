@@ -211,12 +211,11 @@ describe('the catalog list', () => {
     serve({ skills: [] })
     renderAt('/skills')
 
-    // #374: the hint must mention every project discovery dir, not just `.ai/skills/`.
+    // A new user does not need to know Cezar's legacy directories.
     await waitFor(() => {
       const text = document.querySelector('[data-slot="skill-rows"]')?.textContent ?? ''
-      expect(text).toContain('.ai/skills/')
-      expect(text).toContain('.ai/cezar/skills/')
-      expect(text).toContain('Skills already present in this project or your home')
+      expect(text).toContain('Install a skill for any coding agent')
+      expect(text).not.toContain('.ai/skills/')
     })
     // No skills → the bookmarklet panel is the default detail (legacy fallback rule).
     await waitFor(() => expect(document.querySelector('[data-slot="bookmarklet-panel"]')).not.toBeNull())

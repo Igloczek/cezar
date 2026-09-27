@@ -5,8 +5,8 @@ import { runRecordSchema } from './runs.ts';
 // ---- skills (`GET /skills`, `POST /skills/refresh`) ---------------------------------------
 
 /**
- * One discovered skill: repo (`.ai/skills`, `.ai/cezar/skills`), other project
- * and global skills directories, a configured team repo (spec 005), or the one built-in.
+ * One discovered skill: project or global skill directories, older Cezar
+ * directories, a configured team repo (spec 005), or the one built-in.
  */
 export const skillSchema = z.object({
   name: z.string(),

@@ -8,9 +8,8 @@ import { builtinSkills } from './automations/builtin-skill.ts';
 
 /**
  * A skill is a Markdown file with optional YAML-ish frontmatter (`name`,
- * `description`). Discovered from the repo's `.ai/skills/` (shared with other
- * agent tooling), `.ai/cezar/skills/` (cez-local), existing `skills`
- * directories in the project or home, and configured team skills repos
+ * `description`). Discovered from existing `skills` directories in the
+ * project or home, older Cezar directories, and configured team skills repos
  * (spec 005 — bare clones, no checkout).
  * Adapted from @cezar/core's skill-catalog.
  */
@@ -36,9 +35,9 @@ export interface Skill {
   };
 }
 
-/* Cezar's own paths win name collisions. Installed agent skills are discovered
-   from the filesystem, without a list of agent names or install locations. */
-export const SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
+/* Older Cezar skill locations remain readable. Installed agent skills are
+   discovered from the filesystem without a list of agent names. */
+const SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
   { dir: '.ai/cezar/skills', source: 'cezar' },
   { dir: '.ai/skills', source: 'ai' },
 ];
