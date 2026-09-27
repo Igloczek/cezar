@@ -19,7 +19,7 @@ let requests: Array<{ method: string; url: string; body?: unknown }> = []
 /** Two skills, deliberately global-first, so the project-first grouping rule (#377) is visible. */
 const SKILLS = [
   { name: 'g-review', description: 'Global review', body: '', path: '/g/g-review', source: 'global' },
-  { name: 'om-fix', description: 'Fix an issue', body: '', path: '/p/om-fix', source: 'ai' },
+  { name: 'om-fix', description: 'Fix an issue', body: '', path: '/p/om-fix', source: 'project' },
 ]
 
 function serve(uiState: Record<string, unknown> = {}, skills: unknown[] = SKILLS) {

@@ -21,25 +21,24 @@ import {
 
 const skill = (over: Partial<Skill> & Pick<Skill, 'name' | 'source'>): Skill => ({
   body: '',
-  path: `/skills/${over.name}.md`,
+  path: `/skills/${over.name}/SKILL.md`,
   ...over,
 })
 
 describe('isProjectSkill / orderSkills (#377)', () => {
   it('classifies every server source value', () => {
-    expect(isProjectSkill(skill({ name: 'a', source: 'ai' }))).toBe(true)
-    expect(isProjectSkill(skill({ name: 'b', source: 'cezar' }))).toBe(true)
-    expect(isProjectSkill(skill({ name: 'c', source: 'agents' }))).toBe(true)
-    expect(isProjectSkill(skill({ name: 'd', source: 'global' }))).toBe(false)
-    expect(isProjectSkill(skill({ name: 'e', source: 'team' }))).toBe(true)
+    expect(isProjectSkill(skill({ name: 'a', source: 'project' }))).toBe(true)
+    expect(isProjectSkill(skill({ name: 'b', source: 'global' }))).toBe(false)
+    expect(isProjectSkill(skill({ name: 'c', source: 'team' }))).toBe(true)
+    expect(isProjectSkill(skill({ name: 'd', source: 'builtin' }))).toBe(false)
   })
 
   it('orders local and team project skills before user-global skills, stably within each tier', () => {
     const ordered = orderSkills([
       skill({ name: 'g1', source: 'global' }),
-      skill({ name: 'p1', source: 'agents' }),
+      skill({ name: 'p1', source: 'project' }),
       skill({ name: 'g2', source: 'team' }),
-      skill({ name: 'p2', source: 'ai' }),
+      skill({ name: 'p2', source: 'project' }),
     ])
     expect(ordered.map((s) => s.name)).toEqual(['p1', 'g2', 'p2', 'g1'])
   })
@@ -48,9 +47,9 @@ describe('isProjectSkill / orderSkills (#377)', () => {
 describe('partitionSkillsForDisplay / orderSkillsByUsage (#519: most-used → project → global)', () => {
   const skills = [
     skill({ name: 'g1', source: 'global' }),
-    skill({ name: 'p1', source: 'agents' }),
+    skill({ name: 'p1', source: 'project' }),
     skill({ name: 'g2', source: 'global' }),
-    skill({ name: 'p2', source: 'ai' }),
+    skill({ name: 'p2', source: 'project' }),
   ]
 
   it('promotes USED skills above locality — a used global outranks an unused project skill', () => {
@@ -98,9 +97,9 @@ describe('partitionSkillsForDisplay / orderSkillsByUsage (#519: most-used → pr
     const usage = JSON.parse('{"p1": 5}') as Record<string, number>
     const tiers = partitionSkillsForDisplay(
       [
-        skill({ name: 'constructor', source: 'ai' }),
-        skill({ name: 'toString', source: 'ai' }),
-        skill({ name: 'p1', source: 'ai' }),
+        skill({ name: 'constructor', source: 'project' }),
+        skill({ name: 'toString', source: 'project' }),
+        skill({ name: 'p1', source: 'project' }),
       ],
       usage,
     )
@@ -153,8 +152,8 @@ describe('fuzzyMatch', () => {
 describe('filterSkills (#380: filter without re-sorting — project-first survives any query)', () => {
   const skills = [
     skill({ name: 'global-deploy', source: 'global', description: 'Deploy from anywhere' }),
-    skill({ name: 'project-deploy', source: 'ai' }),
-    skill({ name: 'project-review', source: 'cezar', description: 'Review the diff' }),
+    skill({ name: 'project-deploy', source: 'project' }),
+    skill({ name: 'project-review', source: 'project', description: 'Review the diff' }),
   ]
 
   it('empty query keeps everything, project skills first', () => {
@@ -235,16 +234,16 @@ describe('#484: an (almost-)exact match sorts to the top', () => {
 
   it('filterSkills ranks an exact name match above a merely-partial one, reordering input', () => {
     const skills = [
-      skill({ name: 'om-code-review', source: 'ai' }), // 'review' is a whole word, mid-name
-      skill({ name: 'review', source: 'ai' }), // exact match, but later in input order
+      skill({ name: 'om-code-review', source: 'project' }), // 'review' is a whole word, mid-name
+      skill({ name: 'review', source: 'project' }), // exact match, but later in input order
     ]
     expect(filterSkills(skills, 'review').map((s) => s.name)).toEqual(['review', 'om-code-review'])
   })
 
   it('filterSkills ranks a prefix match above a word-boundary match', () => {
     const skills = [
-      skill({ name: 'om-auto-deploy', source: 'ai' }), // boundary hit
-      skill({ name: 'deploy-app', source: 'ai' }), // prefix hit
+      skill({ name: 'om-auto-deploy', source: 'project' }), // boundary hit
+      skill({ name: 'deploy-app', source: 'project' }), // prefix hit
     ]
     expect(filterSkills(skills, 'deploy').map((s) => s.name)).toEqual(['deploy-app', 'om-auto-deploy'])
   })
@@ -252,17 +251,17 @@ describe('#484: an (almost-)exact match sorts to the top', () => {
   it('filterSkills keeps project-first order when matches are equally good', () => {
     const skills = [
       skill({ name: 'global-review', source: 'global' }),
-      skill({ name: 'project-review', source: 'ai' }),
+      skill({ name: 'project-review', source: 'project' }),
     ]
-    // Both match 'review' as a word-boundary hit → tie → project (ai) stays first.
+    // Both match 'review' as a word-boundary hit → tie → project stays first.
     expect(filterSkills(skills, 'review').map((s) => s.name)).toEqual(['project-review', 'global-review'])
   })
 })
 
 describe('searchSkills / searchWorkflows (#484: the pickers rank in JS, not via cmdk)', () => {
   const skills = [
-    skill({ name: 'om-auto-fix-issue', source: 'ai', description: 'Fix an issue; runs om-fix internally' }),
-    skill({ name: 'om-fix', source: 'ai', description: 'Apply the minimal fix' }),
+    skill({ name: 'om-auto-fix-issue', source: 'project', description: 'Fix an issue; runs om-fix internally' }),
+    skill({ name: 'om-fix', source: 'project', description: 'Apply the minimal fix' }),
     skill({ name: 'om-open-pr', source: 'global', description: 'Open a PR' }),
   ]
 
@@ -286,8 +285,8 @@ describe('searchSkills / searchWorkflows (#484: the pickers rank in JS, not via 
   it('a name match outranks a description-only match', () => {
     // "issue": om-auto-fix-issue matches on the name (whole word), om-open-pr only via description.
     const s2 = [
-      skill({ name: 'om-open-pr', source: 'ai', description: 'Open a PR for an issue' }),
-      skill({ name: 'om-auto-fix-issue', source: 'ai' }),
+      skill({ name: 'om-open-pr', source: 'project', description: 'Open a PR for an issue' }),
+      skill({ name: 'om-auto-fix-issue', source: 'project' }),
     ]
     expect(searchSkills(s2, 'issue').map((s) => s.name)).toEqual(['om-auto-fix-issue', 'om-open-pr'])
   })
@@ -351,7 +350,7 @@ describe('skillUsedBy (the detail pane’s "Used by" breadcrumbs)', () => {
 
 describe('#519: usage folds into query ranking and the / autocomplete order', () => {
   const skills = [
-    skill({ name: 'project-deploy', source: 'ai' }),
+    skill({ name: 'project-deploy', source: 'project' }),
     skill({ name: 'global-deploy', source: 'global', description: 'Deploy from anywhere' }),
   ]
 
@@ -379,8 +378,8 @@ describe('#519: usage folds into query ranking and the / autocomplete order', ()
 
   it('the usage bonus is bounded — heavy usage never outranks a clearly better name match', () => {
     const s2 = [
-      skill({ name: 'om-fix', source: 'ai' }),
-      skill({ name: 'om-auto-fix-issue', source: 'ai', description: 'runs om-fix internally' }),
+      skill({ name: 'om-fix', source: 'project' }),
+      skill({ name: 'om-auto-fix-issue', source: 'project', description: 'runs om-fix internally' }),
     ]
     expect(searchSkills(s2, 'om-fix', { 'om-auto-fix-issue': 999 }).map((s) => s.name)).toEqual([
       'om-fix',

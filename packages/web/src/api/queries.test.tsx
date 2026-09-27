@@ -469,7 +469,7 @@ describe('useSkills', () => {
     let resolveReady!: (response: Response) => void
     fetchMock.mockImplementation(async (input) => {
       if (String(input) === '/api/v1/skills') {
-        return json([{ name: 'local', source: 'ai', body: '', path: '/repo/local.md' }])
+        return json([{ name: 'local', source: 'project', body: '', path: '/repo/local.md' }])
       }
       if (String(input) === '/api/v1/skills?wait=1') {
         return new Promise<Response>((resolve) => {
@@ -485,7 +485,7 @@ describe('useSkills', () => {
 
     resolveReady(
       json([
-        { name: 'local', source: 'ai', body: '', path: '/repo/local.md' },
+        { name: 'local', source: 'project', body: '', path: '/repo/local.md' },
         { name: 'om-fix', source: 'team', body: '', path: 'skills/om-fix/SKILL.md' },
       ]),
     )

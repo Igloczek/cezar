@@ -25,11 +25,11 @@ Three words, no jargon — **task**, **skill**, **chain**:
   screenshots, PDFs, `.txt` or `.md` files to the task (paperclip, ⌘V or drag-drop;
   the agent gets each one as a real file on disk), or send follow-up messages into
   the live session while it works.
-- 📖 **Skills** are Markdown playbooks. Drop them in `.ai/skills/` or
-  `.ai/cezar/skills/`, or pull them from a shared **team skills repo** (a bare
-  git clone cached globally in `~/.cache/cez/`). A workflow step references one by
-  `skill: <name>` and its body becomes the agent's extra system prompt — so you
-  shape *how* the agent reasons without touching code.
+- 📖 **Skills** are `SKILL.md` playbooks. Cezar finds skills already installed for
+  coding agents in the project or your home, or pulls them from a shared **team skills repo**
+  (a bare git clone cached globally in `~/.cache/cez/`).
+  A workflow step references one by `skill: <name>` and its body becomes the
+  agent's extra system prompt — so you shape *how* the agent reasons without touching code.
 - 🔗 **Chains (workflows)** stitch steps into a pipeline: agent steps plus shell
   checks, with bounded `onFail` retry loops. Write the YAML yourself, build one by
   drag-ordering skills in the **Workflows** tab, or press **Plan first** and let the
@@ -240,7 +240,7 @@ steps:
   - id: implement
     name: Implement
     prompt: "{{task}}"
-    skill: project-conventions   # optional — from .ai/skills or .ai/cezar/skills
+    skill: project-conventions   # optional — from the discovered skill catalog
     # model: opus                # optional per-step model override
     # runner: codex              # optional per-step backend: claude · codex · opencode · pi
     # allowedTools: [Read, Edit, Write, Grep, Glob, Bash]

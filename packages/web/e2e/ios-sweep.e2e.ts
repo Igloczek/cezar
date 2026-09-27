@@ -163,9 +163,7 @@ describe('iOS sweep — every primary view at 390×844', () => {
   })
 
   it('/settings/skills', () => {
-    // The route div renders around a "Loading…" list — wait for a real skill row (this repo's
-    // `.ai/skills` is never empty), so the overflow check measures actual content.
-    sweep('settings-skills', '/settings/skills', '[data-slot="skill-row"]')
+    sweep('settings-skills', '/settings/skills', '[data-slot="skills-list"]')
   })
 
   it('/settings/agents', () => {

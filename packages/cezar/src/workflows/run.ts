@@ -3182,7 +3182,12 @@ export class RunManager {
 
   /** Shared live-session delivery. Synthetic scheduler prompts reuse lifecycle
    * bookkeeping without masquerading as user-authored transcript messages. */
-  private deliverMessage(runId: string, content: PastedContent[], userAuthored: boolean): boolean {
+  private deliverMessage(
+    runId: string,
+    content: PastedContent[],
+    userAuthored: boolean,
+    preparedTeamSkillDir?: string | null,
+  ): boolean {
     const state = this.active.get(runId);
     if (!state?.session?.open || state.cancelled) return false;
     // A parked in-place run gave the working-tree lease back (`parkRepoRoot`). It must own the
@@ -3208,6 +3213,18 @@ export class RunManager {
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
       .join('\n');
+    const slashSkill = userAuthored ? registrySlashSkill(text, state.skills ?? [])?.skill : undefined;
+    if (slashSkill?.source === 'team' && slashSkill.team && preparedTeamSkillDir === undefined) {
+      // Live messages have a synchronous acceptance API. Prepare companion files
+      // before delivery, then use the same path as opening and continuation turns.
+      void materializeSkillDir(state.cwd, slashSkill)
+        .catch(() => null)
+        .then((dir) => {
+          if (this.deliverMessage(runId, content, userAuthored, dir) || this.enqueueMessage(runId, content)) return;
+          this.deferMessage(runId, content);
+        });
+      return true;
+    }
     // Persist the attachments so the thread can render them (not just count them) — the same
     // on-disk store + `/images/` route the agent's own screenshots use. `pasted` prefix marks
     // these as user attachments (vs. agent tool screenshots) on disk (#357).
@@ -3233,7 +3250,9 @@ export class RunManager {
     // at all for a non-image attachment (#950), which is why `contentBlocksOf` drops file blocks
     // here rather than letting one reach a backend that has no idea what it is.
     const blocks = contentBlocksOf(content);
-    const expanded = userAuthored ? expandRegistrySlashSkill(blocks, state.skills ?? []) : blocks;
+    const expanded = userAuthored
+      ? expandRegistrySlashSkill(blocks, state.skills ?? [], preparedTeamSkillDir ?? undefined)
+      : blocks;
     const deliverable = persisted.length
       ? [...expanded, pastedAttachmentsNote(persisted, this.attachmentLibraryHint(persisted) ??
           (imageLibraryWrites.length ? attachmentLibraryDir(this.dataDir) : undefined))]
@@ -3830,7 +3849,8 @@ export class RunManager {
     // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
     // live path applies (#811). Delivery-only: the `user-message` event above already
     // persisted the user's original text, and the transcript must keep showing that.
-    const expandedPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []);
+    const slashSkillDir = await materializeSlashTeamSkill(state.cwd, prompt, state.skills ?? []);
+    const expandedPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? [], slashSkillDir);
     // Reports that arrived while this run had no session (spec Q7) open the continuation, ahead
     // of whatever prompted it — a commander resumed by its own children's reports has to be told
     // what they said. Delivery-only, like the `/skill` rewrite above.
@@ -4323,6 +4343,7 @@ export class RunManager {
     attachments: PersistedAttachment[] = [],
   ): Promise<string | null> {
     let systemPrompt: string | undefined;
+    let selectedSkillDir: string | undefined;
     if (step.skill) {
       const skill = skills.find((s) => s.name === step.skill);
       if (skill) {
@@ -4330,26 +4351,24 @@ export class RunManager {
         // name and catalog description in the normalized runner payload so a
         // numeric task such as "432" still gives the model enough context to
         // describe the work — and therefore derive a useful title (#432).
-        systemPrompt = skillSystemPrompt(skill);
         // Directory team skills (SKILL.md + references/) get materialized
-        // into <cwd>/.claude/skills/<name>/ — the run's worktree when there
-        // is one — so claude sees the companion files on disk; the shared
-        // info/exclude keeps them out of git (and out of autosave commits).
-        if (skill.source === 'team' && skill.team?.dir) {
-          const seeded = await materializeSkillDir(state.cwd, skill).catch(() => false);
-          if (seeded) {
+        // under Cezar's ignored run data; every backend receives its absolute path.
+        if (skill.source === 'team' && skill.team) {
+          selectedSkillDir = (await materializeSkillDir(state.cwd, skill).catch(() => null)) ?? undefined;
+          if (selectedSkillDir) {
             emit({
               type: 'note',
               stepId: step.id,
-              message: `team skill "${skill.name}" materialized to .claude/skills/${skill.name}/`,
+              message: `team skill "${skill.name}" materialized to ${selectedSkillDir}`,
             });
           }
         }
+        systemPrompt = skillSystemPrompt(skill, selectedSkillDir);
       } else {
         emit({
           type: 'note',
           stepId: step.id,
-          message: `skill "${step.skill}" not found in .ai/cezar/skills, .ai/skills or the team skills repo — running with the plain prompt`,
+          message: `skill "${step.skill}" not found in local or team skill sources — running with the plain prompt`,
         });
       }
     }
@@ -4362,7 +4381,11 @@ export class RunManager {
     // Cezar lists the skill (#278). `state.skills` was populated by `discoverSkills` earlier in
     // `execute`. Expand before the chain/check/attachment prefixes so the leading slash still
     // matches; a leading `/name` that is not a known skill passes through byte-for-byte.
-    userPrompt = expandRegistrySlashSkillText(userPrompt, state.skills ?? []);
+    const slashSkill = registrySlashSkill(userPrompt, state.skills ?? []);
+    const slashSkillDir = slashSkill?.skill.name === step.skill
+      ? selectedSkillDir
+      : await materializeSlashTeamSkill(state.cwd, userPrompt, state.skills ?? []);
+    userPrompt = expandRegistrySlashSkillText(userPrompt, state.skills ?? [], slashSkillDir);
     if (chainNote) userPrompt = `${chainNote}\n\n---\n\n${userPrompt}`;
     // A commander recovered after a restart opens its first session holding whatever its children
     // reported while it was gone (spec Q7). Prepended and cleared here, after the slash expansion
@@ -5564,32 +5587,54 @@ export function makeRunTitle(task: string, workflow: WorkflowDef): string {
  *
  * For an on-disk skill we also hand the agent the ABSOLUTE directory of the
  * installed copy. A run executes in an isolated worktree that has no local
- * `.agents/skills` (gitignored, absent in a fresh checkout), so without this
+ * installed skill directories (gitignored, absent in a fresh checkout), so without this
  * the agent cannot read the skill's companion files (`references/*.md`) — or,
  * worse, reads a stale copy materialized from the team-repo cache. The path
  * resolves against the MAIN project root (`discoverSkills(repoRoot)`), i.e. the
- * current `npx skills`-installed copy, so a worktree agent and the main
- * checkout read the exact same, up-to-date files. Team skills are omitted here:
- * they are materialized into the worktree separately (see the call site).
+ * current installed copy, so a worktree agent and the main
+ * checkout read the exact same, up-to-date files. A materialized team skill
+ * passes its worktree directory explicitly (see the call site).
  */
 export function skillSystemPrompt(
   skill: Pick<Skill, 'name' | 'description' | 'body'> & Partial<Pick<Skill, 'path' | 'source'>>,
+  installedDir?: string,
 ): string {
   const lines = [
     `Selected skill: /${skill.name}`,
     ...(skill.description ? [`Description: ${skill.description}`] : []),
   ];
-  if (skill.source && skill.source !== 'team' && skill.path) {
-    const dir = dirname(skill.path);
+  const dir =
+    installedDir ??
+    (skill.source && skill.source !== 'team' && skill.path ? dirname(skill.path) : undefined);
+  if (dir) {
     lines.push(
       '',
       `Skill files are installed on disk at: ${dir}`,
       `Read any file this skill references (for example references/*.md) from that absolute directory. ` +
-        `It is the current installed copy — use it even though your working directory is a separate worktree that does not contain the skill.`,
+        `It is the current installed copy; use it instead of searching other skill locations.`,
     );
   }
   lines.push('', 'Skill instructions:', skill.body.trim());
   return lines.join('\n');
+}
+
+async function materializeSlashTeamSkill(
+  cwd: string,
+  text: string,
+  skills: readonly Skill[],
+): Promise<string | undefined> {
+  const skill = registrySlashSkill(text, skills)?.skill;
+  if (skill?.source !== 'team' || !skill.team) return undefined;
+  return (await materializeSkillDir(cwd, skill).catch(() => null)) ?? undefined;
+}
+
+function registrySlashSkill(
+  text: string,
+  skills: readonly Skill[],
+): { skill: Skill; command: RegExpExecArray } | undefined {
+  const match = /^\/([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)/.exec(text);
+  const skill = match && skills.find((candidate) => candidate.name === match[1]);
+  return match && skill ? { skill, command: match } : undefined;
 }
 
 /**
@@ -5606,14 +5651,20 @@ export function skillSystemPrompt(
  * the session's `userPrompt` and never passes through `deliverMessage` at all
  * (#811).
  */
-export function expandRegistrySlashSkillText(text: string, skills: readonly Skill[]): string {
-  const match = /^\/([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)/.exec(text);
+export function expandRegistrySlashSkillText(
+  text: string,
+  skills: readonly Skill[],
+  installedDir?: string,
+): string {
+  const match = registrySlashSkill(text, skills);
   if (!match) return text;
-  const skill = skills.find((candidate) => candidate.name === match[1]);
-  if (!skill) return text;
 
-  const request = text.slice(match[0].length).trim();
-  return request ? `${skillSystemPrompt(skill)}\n\nUser request:\n${request}` : skillSystemPrompt(skill);
+  const request = text.slice(match.command[0].length).trim();
+  const prompt = skillSystemPrompt(
+    match.skill,
+    match.skill.source === 'team' ? installedDir : undefined,
+  );
+  return request ? `${prompt}\n\nUser request:\n${request}` : prompt;
 }
 
 /**
@@ -5624,12 +5675,13 @@ export function expandRegistrySlashSkillText(text: string, skills: readonly Skil
 export function expandRegistrySlashSkill(
   content: ContentBlock[],
   skills: readonly Skill[],
+  installedDir?: string,
 ): ContentBlock[] {
   const textIndex = content.findIndex((block) => block.type === 'text');
   if (textIndex < 0) return content;
   const block = content[textIndex];
   if (!block || block.type !== 'text') return content;
-  const text = expandRegistrySlashSkillText(block.text, skills);
+  const text = expandRegistrySlashSkillText(block.text, skills, installedDir);
   if (text === block.text) return content;
 
   const expanded = [...content];

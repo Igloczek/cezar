@@ -67,14 +67,15 @@ beforeAll(async () => {
 
   // TWO project skills, so the spec can prove an actual PICK (not just the default): the
   // picker defaults to the first project skill, then we choose the other one.
-  mkdirSync(join(dataRoot, '.ai/skills'), { recursive: true })
+  mkdirSync(join(dataRoot, '.agents/skills/lint-fix'), { recursive: true })
+  mkdirSync(join(dataRoot, '.agents/skills/spec-writer'), { recursive: true })
   writeFileSync(
-    join(dataRoot, '.ai/skills/lint-fix.md'),
+    join(dataRoot, '.agents/skills/lint-fix/SKILL.md'),
     '---\ndescription: Fix lint findings in the changed files\n---\n\nRun the linter and fix everything it reports.\n',
     'utf8',
   )
   writeFileSync(
-    join(dataRoot, '.ai/skills/spec-writer.md'),
+    join(dataRoot, '.agents/skills/spec-writer/SKILL.md'),
     '---\ndescription: Draft a feature spec from a one-line idea\n---\n\nWrite the spec.\n',
     'utf8',
   )

@@ -70,7 +70,7 @@ function run(overrides: Partial<RunRecord> & { id: string; title: string }): Run
 }
 
 function skill(overrides: Partial<Skill> & { name: string; source: Skill['source'] }): Skill {
-  return { body: '', path: `/skills/${overrides.source}/${overrides.name}.md`, ...overrides }
+  return { body: '', path: `/skills/${overrides.source}/${overrides.name}/SKILL.md`, ...overrides }
 }
 
 function indexed(
@@ -853,10 +853,10 @@ describe('Actions group', () => {
 describe('Skills group', () => {
   const MIXED: Skill[] = [
     skill({ name: 'global-deploy', source: 'global', description: 'Deploy from anywhere' }),
-    skill({ name: 'project-review', source: 'agents', description: 'Review the diff' }),
+    skill({ name: 'project-review', source: 'project', description: 'Review the diff' }),
     skill({ name: 'team-release', source: 'team' }),
-    skill({ name: 'project-fix', source: 'ai' }),
-    skill({ name: 'project-plan', source: 'cezar' }),
+    skill({ name: 'project-fix', source: 'project' }),
+    skill({ name: 'project-plan', source: 'project' }),
   ]
 
   it('orders local and team project skills before global ones, stably (#377/#555)', async () => {
@@ -910,11 +910,11 @@ describe('the pure ordering helpers', () => {
     const ordered = orderSkills([
       skill({ name: 'g', source: 'global' }),
       skill({ name: 't', source: 'team' }),
-      skill({ name: 'a', source: 'agents' }),
-      skill({ name: 'c', source: 'cezar' }),
-      skill({ name: 'i', source: 'ai' }),
+      skill({ name: 'a', source: 'project' }),
+      skill({ name: 'c', source: 'project' }),
+      skill({ name: 'i', source: 'project' }),
     ])
-    expect(ordered.map((entry) => entry.source)).toEqual(['team', 'agents', 'cezar', 'ai', 'global'])
+    expect(ordered.map((entry) => entry.source)).toEqual(['team', 'project', 'project', 'project', 'global'])
   })
 
   it('orderRuns sorts newest first without mutating its input', () => {

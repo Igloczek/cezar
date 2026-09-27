@@ -53,7 +53,7 @@
 - 🤖&nbsp;Turn on **Autonomous** and a run never stops to ask. It just finishes.
 - 📡&nbsp;Watch it work live: agent text, tool calls, tokens and cost.
 - 🏁&nbsp;Run the same task ×2 or ×3, compare the diffs and keep the best one.
-- 🧩&nbsp;Skills are Markdown files and workflows are short YAML files. Mix agents per step.
+- 🧩&nbsp;Skills use `SKILL.md` and workflows are short YAML files. Mix agents per step.
 - 🐙&nbsp;Run the agent straight on a GitHub issue. Nothing merges on its own.
 - 📂&nbsp;One cockpit for all your projects.
 - 💾&nbsp;No database. Everything is saved as plain files in `.ai/cezar/`.
@@ -139,7 +139,7 @@ name: fix-and-verify
 steps:
   - id: implement
     prompt: "{{task}}"
-    skill: project-conventions   # optional: a Markdown skill from .ai/skills
+    skill: project-conventions   # optional: a discovered Markdown skill
     runner: codex                # optional: which agent runs this step
   - id: verify
     command: "npm test"          # exit 0 = pass
@@ -147,6 +147,8 @@ steps:
 ```
 
 The built-in `quick-task` workflow runs with no setup.
+
+Cezar reads `skills/<name>/SKILL.md` from coding-agent directories in the project and your home. Move skills from Cezar-only `.ai/skills` or `.ai/cezar/skills` into one of those directories; flat `.md` files need a `<name>/SKILL.md` layout.
 
 ## Documentation
 

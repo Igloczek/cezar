@@ -81,7 +81,7 @@ Options:
   -h, --help                  show this help
 
 Zero config: uses your logged-in \`claude\` CLI (and \`gh\` for GitHub bits).
-Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repo
+SKILL.md files are discovered from project and home skill directories and your team skills repo
 (default open-mercato/skills; override via .ai/cezar/config.json);
 workflows in .ai/cezar/workflows/.`;
 

@@ -1,5 +1,9 @@
+import { execFileSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { bareDirFor, isPinnedSha, shouldPassiveFetch } from './skills-remote.ts';
+import { bareDirFor, isPinnedSha, listRemoteSkills, materializeSkillDir, shouldPassiveFetch } from './skills-remote.ts';
 
 const TTL = 6 * 60 * 60 * 1_000;
 
@@ -41,4 +45,44 @@ describe('isPinnedSha', () => {
     expect(isPinnedSha('b'.repeat(64))).toBe(true);
     expect(isPinnedSha('main')).toBe(false);
   });
+});
+
+it('passes a team skill and its references through Cezar-owned files, without an agent directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'cezar-team-skill-'));
+  const previousHome = process.env.HOME;
+  process.env.HOME = join(root, 'home');
+  const git = (...args: string[]): string => execFileSync('git', args, { encoding: 'utf8' }).trim();
+  try {
+    const source = join(root, 'source');
+    const checkout = join(root, 'checkout');
+    await mkdir(join(source, 'review', 'references'), { recursive: true });
+    await mkdir(join(source, 'commands'), { recursive: true });
+    await mkdir(join(source, '.ai/skills'), { recursive: true });
+    await mkdir(checkout);
+    await writeFile(join(source, 'review', 'SKILL.md'), '# Review');
+    await writeFile(join(source, 'review', 'references', 'rules.md'), '# Rules');
+    await writeFile(join(source, 'commands', 'legacy.md'), '# Old command');
+    await writeFile(join(source, '.ai/skills', 'legacy.md'), '# Old Cezar skill');
+    git('init', '-q', '-b', 'main', source);
+    git('-C', source, 'add', '.');
+    git('-C', source, '-c', 'user.name=Test', '-c', 'user.email=test@example.com', 'commit', '-m', 'skill');
+    git('init', '-q', '-b', 'main', checkout);
+    const bare = bareDirFor(source);
+    expect(bare.startsWith(process.env.HOME)).toBe(true);
+    await mkdir(dirname(bare), { recursive: true });
+    git('clone', '-q', '--bare', source, bare);
+    expect((await listRemoteSkills({ repo: source, ref: 'main' })).map((skill) => skill.name)).toEqual(['review']);
+
+    const dir = await materializeSkillDir(checkout, {
+      name: 'review', body: '# Review', path: `${source}@main:review/SKILL.md`, source: 'team',
+      team: { repo: source, ref: 'main', path: 'review/SKILL.md' },
+    });
+    expect(dir).toBe(join(checkout, '.ai/cezar/tmp/skills/review'));
+    expect(await readFile(join(dir!, 'references/rules.md'), 'utf8')).toBe('# Rules');
+    expect(git('-C', checkout, 'status', '--short', '--untracked-files=all')).toBe('');
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    await rm(root, { recursive: true, force: true });
+  }
 });

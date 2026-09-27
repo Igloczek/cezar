@@ -1,17 +1,16 @@
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve, basename, dirname, extname } from 'node:path';
+import { join, basename, dirname, isAbsolute } from 'node:path';
 import { gatedSkillsRepos } from './config.ts';
 import { getTeamSkillsCached } from './skills-remote.ts';
 import { readWorkspaceUiState } from './workspace/ui-state.ts';
 import { builtinSkills } from './automations/builtin-skill.ts';
 
 /**
- * A skill is a Markdown file with optional YAML-ish frontmatter (`name`,
- * `description`). Discovered from the repo's `.ai/skills/` (shared with other
- * agent tooling), `.ai/cezar/skills/` (cez-local), the `npx skills` install
- * dirs (`.agents/skills` + the per-agent mirrors, project and global), and
- * the configured team skills repos (spec 005 — bare clones, no checkout).
+ * A skill is a SKILL.md file with optional YAML-ish frontmatter (`name`,
+ * `description`). Discovered from existing `skills` directories in the
+ * project or home and configured team skills repos
+ * (spec 005 — bare clones, no checkout).
  * Adapted from @cezar/core's skill-catalog.
  */
 export interface Skill {
@@ -23,52 +22,80 @@ export interface Skill {
   path: string;
   /** `builtin` is the one skill cezar ships itself (`create-cezar-automation`, spec
    *  2026-09-13-automations-from-prompt) — listed last, and only while automations are reachable. */
-  source: 'ai' | 'cezar' | 'agents' | 'global' | 'team' | 'builtin';
+  source: 'project' | 'global' | 'team' | 'builtin';
   /** Team skills only: where the definition lives in its skills repo. */
   team?: {
     repo: string;
     ref: string;
     path: string;
-    /** True for the `SKILL.md` convention — a whole directory (references/…). */
-    dir: boolean;
     /** The exact commit `ref` resolved to when the skill was read (#428). */
     commit?: string;
   };
 }
 
-/* Precedence order — earlier dirs win name collisions. `npx skills` writes
-   the canonical copy to `.agents/skills/<name>/SKILL.md` and mirrors it into
-   each agent's dir (often as symlinks) — scanning them all and deduping by
-   name yields exactly the union of unique skills.
+/** Find existing `skills` directories without knowing which agent owns them. */
+async function findSkillDirs(
+  root: string,
+  maxDepth: number,
+  excludedAtRoot: ReadonlySet<string> = new Set(),
+): Promise<string[]> {
+  const found: string[] = [];
+  const realRoot = await realpath(root).catch(() => null);
+  if (!realRoot) return found;
+  const visited = new Set([realRoot]);
+  const queue = [{ dir: root, real: realRoot, depth: 0 }];
+  while (queue.length) {
+    const batch = queue.splice(0, 32);
+    const children = await Promise.all(batch.map(async ({ dir, real, depth }) => {
+      const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+      return Promise.all(entries.map(async (entry) => {
+        if (
+          (depth === 0 && excludedAtRoot.has(entry.name)) ||
+          entry.name === '.git' || entry.name === 'node_modules' ||
+          entry.name === '.cache' || entry.name === 'worktrees'
+        ) return null;
+        const path = join(dir, entry.name);
+        const isDir = entry.isDirectory() ||
+          (entry.isSymbolicLink() && await stat(path).then((s) => s.isDirectory()).catch(() => false));
+        if (!isDir) return null;
+        if (entry.name === 'skills') {
+          found.push(path);
+          return null;
+        }
+        if (depth + 1 >= maxDepth) return null;
+        const target = entry.isSymbolicLink() ? await realpath(path).catch(() => null) : join(real, entry.name);
+        return target ? { dir: path, real: target, depth: depth + 1 } : null;
+      }));
+    }));
+    for (const child of children.flat()) {
+      if (!child || visited.has(child.real)) continue;
+      visited.add(child.real);
+      queue.push(child);
+    }
+  }
+  return found.sort();
+}
 
-   Exported for the drift guard in `test/unit/skill-dirs.test.ts` (#374): the
-   cockpit's empty-state hint hand-copies this list into the bundle
-   (`packages/web/src/components/skill-empty-hint.tsx`) because it runs in another
-   process, so adding a dir here without updating the hint makes the hint lie.
-   That test pins this list and says where to go. */
-export const SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
-  { dir: '.ai/cezar/skills', source: 'cezar' },
-  { dir: '.ai/skills', source: 'ai' },
-  { dir: '.agents/skills', source: 'agents' },
-  { dir: '.claude/skills', source: 'agents' },
-  { dir: '.codex/skills', source: 'agents' },
-  { dir: '.cursor/skills', source: 'agents' },
-  { dir: '.opencode/skills', source: 'agents' },
-];
-
-/* Deliberately `homedir()` and not `agentHomePaths().claude`: these do NOT follow an
-   agent profile (`src/core/agent-profiles.ts`). A skill is CONTENT — a playbook — not
-   identity, and a second Claude login is not a second skill library. `npx skills`, which
-   writes the `~/.claude/skills` mirror, is profile-unaware for the same reason. */
-const GLOBAL_SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
-  { dir: join(homedir(), '.agents/skills'), source: 'global' },
-  { dir: join(homedir(), '.claude/skills'), source: 'global' },
-];
+async function globalSkillDirs(): Promise<string[]> {
+  const home = homedir();
+  const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(home, '.config');
+  const homeEntries = await readdir(home, { withFileTypes: true }).catch(() => []);
+  const roots = [...new Set([
+    ...homeEntries.filter((entry) => entry.name.startsWith('.') && entry.name !== '.cache' &&
+      (entry.isDirectory() || entry.isSymbolicLink()))
+      .map((entry) => join(home, entry.name)),
+    configHome,
+    ...Object.entries(process.env)
+      .filter(([key, value]) => /(?:_HOME|_CONFIG_DIR)$|^(?:APPDATA|LOCALAPPDATA)$/.test(key) && value && isAbsolute(value))
+      .map(([, value]) => value!),
+  ])];
+  const nested = await Promise.all(roots.map((root) => findSkillDirs(root, 5)));
+  return [...new Set([...await findSkillDirs(home, 1), ...nested.flat()])];
+}
 
 /**
  * Discover the merged skill catalog for a repo. Name collisions resolve
- * local-first: `.ai/cezar/skills` → `.ai/skills` → `.agents/skills` + agent
- * mirrors → global (`~/.agents/skills`, `~/.claude/skills`) → team repo
+ * local-first: installed project skills → installed global skills → team repo
  * ("the user's repo is the source of truth"). Missing directories are fine —
  * an empty catalog is fully supported (steps fall back to their plain
  * prompt). Team skills come from the in-process cache; the first call starts
@@ -88,10 +115,16 @@ const GLOBAL_SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
  * picker, planner, runner.
  */
 export async function discoverSkills(repoRoot: string): Promise<Skill[]> {
+  const projectSkillDirs = await findSkillDirs(
+    repoRoot,
+    4,
+    new Set(['.ai', '.git', 'node_modules']),
+  );
+  const globalDirs = await globalSkillDirs();
   const [lists, gatedRepos, uiState] = await Promise.all([
     Promise.all([
-      ...SKILL_DIRS.map(({ dir, source }) => readMarkdownSkills(resolve(repoRoot, dir), source)),
-      ...GLOBAL_SKILL_DIRS.map(({ dir, source }) => readMarkdownSkills(dir, source)),
+      ...projectSkillDirs.map((dir) => readSkillFiles(dir, 'project')),
+      ...globalDirs.map((dir) => readSkillFiles(dir, 'global')),
     ]),
     gatedSkillsRepos(repoRoot),
     readWorkspaceUiState(),
@@ -152,8 +185,7 @@ export function filterImportedTeamSkills(
 /**
  * Walk a skills dir for entrypoints, following directory symlinks. Once a
  * directory contains `SKILL.md`, it is one directory-based skill and its
- * supporting Markdown (for example `references/*.md`) is not scanned. Other
- * directories retain the legacy recursive `*.md` discovery behavior.
+ * supporting Markdown (for example `references/*.md`) is not scanned.
  */
 async function skillEntryPaths(
   dir: string,
@@ -199,14 +231,12 @@ async function skillEntryPaths(
     }
     if (isDir) {
       paths.push(...(await skillEntryPaths(path, depth - 1, visited)));
-    } else if (extname(entry.name).toLowerCase() === '.md') {
-      paths.push(path);
     }
   }
   return paths;
 }
 
-async function readMarkdownSkills(dir: string, source: Skill['source']): Promise<Skill[]> {
+async function readSkillFiles(dir: string, source: Skill['source']): Promise<Skill[]> {
   const paths = await skillEntryPaths(dir, 4, new Set());
   const skills: Skill[] = [];
   for (const absPath of paths) {
@@ -217,9 +247,7 @@ async function readMarkdownSkills(dir: string, source: Skill['source']): Promise
       continue;
     }
     const { frontmatter, body } = parseFrontmatter(raw);
-    const base = basename(absPath, extname(absPath));
-    // The `SKILL.md` convention names the skill after its directory.
-    const fallback = base.toLowerCase() === 'skill' ? basename(dirname(absPath)) : base;
+    const fallback = basename(dirname(absPath));
     const name =
       typeof frontmatter.name === 'string' && frontmatter.name.trim()
         ? frontmatter.name.trim()

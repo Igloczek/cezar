@@ -238,31 +238,12 @@ async function resolveRef(bareDir: string, ref: string): Promise<string | null> 
   return null;
 }
 
-// ---- skill discovery (three conventions) --------------------------------------
+// ---- skill discovery -----------------------------------------------------------
 
-interface SkillPathHit {
-  /** null → the name comes from the file's frontmatter (markdown convention). */
-  name: string | null;
-  kind: 'skill' | 'command' | 'markdown';
-}
-
-/**
- * Match the janitor conventions plus our own:
- *  - `**\/SKILL.md`          → skill named after the parent directory (with references/)
- *  - `**\/commands/<n>.md`   → skill `<n>`
- *  - `.ai/skills/**\/*.md` or `.ai/cezar/skills/**\/*.md` → frontmatter/basename name
- */
-function matchSkillPath(line: string): SkillPathHit | null {
-  if (line === 'SKILL.md' || line.endsWith('/SKILL.md')) {
-    const parts = line.split('/');
-    if (parts.length < 2) return null;
-    const parent = parts[parts.length - 2];
-    return parent && parent !== '.' ? { name: parent, kind: 'skill' } : null;
-  }
-  const cmd = /(?:^|\/)commands\/([^/]+)\.md$/.exec(line);
-  if (cmd) return { name: cmd[1] as string, kind: 'command' };
-  if (/(?:^|\/)\.ai\/(?:cezar\/)?skills\/.+\.md$/.test(line)) return { name: null, kind: 'markdown' };
-  return null;
+function skillNameFromPath(path: string): string | null {
+  if (!path.endsWith('/SKILL.md')) return null;
+  const name = basename(dirname(path));
+  return name && name !== '.' ? name : null;
 }
 
 /**
@@ -303,16 +284,11 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
   const seen = new Set<string>();
   for (const line of ls.stdout.split('\n')) {
     if (!line) continue;
-    const hit = matchSkillPath(line);
-    if (!hit) continue;
+    const name = skillNameFromPath(line);
+    if (!name) continue;
     const raw = await readRemoteSkill(src, line, commit);
     if (raw === null) continue;
     const { frontmatter, body } = parseFrontmatter(raw);
-    const name =
-      hit.name ??
-      (typeof frontmatter.name === 'string' && frontmatter.name.trim()
-        ? frontmatter.name.trim()
-        : basename(line, '.md'));
     if (seen.has(name)) continue;
     seen.add(name);
     const description =
@@ -325,7 +301,7 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
       body,
       path: `${src.repo}@${src.ref}:${line}`,
       source: 'team',
-      team: { repo: src.repo, ref: src.ref, path: line, dir: hit.kind === 'skill', commit },
+      team: { repo: src.repo, ref: src.ref, path: line, commit },
     });
   }
   return skills;
@@ -335,21 +311,31 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
 
 /**
  * Copy a directory skill (SKILL.md + references/…) out of the bare clone into
- * `<repoRoot>/.claude/skills/<name>/` so claude sees the references on disk,
- * and keep it out of the user's git via `.git/info/exclude`. Returns false
- * when there is nothing to materialize (not a directory skill, no clone…).
+ * `<repoRoot>/.ai/cezar/tmp/skills/<name>/`. Cezar passes that absolute path
+ * to any backend, so no agent-specific installation or symlinks are needed.
+ * Keep it out of the user's git via `.git/info/exclude`. Returns the directory, or null
+ * when there is nothing to materialize (no clone…).
  */
-export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<boolean> {
-  if (!skill.team?.dir || !skill.team.path.endsWith('SKILL.md')) return false;
+export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<string | null> {
+  if (
+    !skill.team ||
+    !skill.team.path.endsWith('SKILL.md') ||
+    !skill.name ||
+    skill.name === '.' ||
+    skill.name === '..' ||
+    /[\\/]/.test(skill.name)
+  ) {
+    return null;
+  }
   const bareDir = bareDirFor(skill.team.repo);
-  if (!existsSync(join(bareDir, 'HEAD'))) return false;
+  if (!existsSync(join(bareDir, 'HEAD'))) return null;
   const ref = await resolveRef(bareDir, skill.team.ref);
-  if (ref === null) return false;
+  if (ref === null) return null;
   const srcDir = skill.team.path.slice(0, -'/SKILL.md'.length);
   const ls = await git(['ls-tree', '-r', '--name-only', ref, '--', srcDir], LIST_TIMEOUT_MS, bareDir);
-  if (!ls.ok) return false;
+  if (!ls.ok) return null;
 
-  const destDir = join(repoRoot, '.claude', 'skills', skill.name);
+  const destDir = join(repoRoot, '.ai', 'cezar', 'tmp', 'skills', skill.name);
   let wrote = 0;
   for (const file of ls.stdout.split('\n').filter(Boolean)) {
     const rel = file.slice(srcDir.length + 1);
@@ -362,9 +348,9 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
     await writeFile(target, show.stdout, 'utf8');
     wrote++;
   }
-  if (wrote === 0) return false;
-  await excludeFromGit(repoRoot, `.claude/skills/${skill.name}/`);
-  return true;
+  if (wrote === 0) return null;
+  await excludeFromGit(repoRoot, '.ai/cezar/tmp/');
+  return destDir;
 }
 
 /** Append a pattern to git's `info/exclude` (idempotent, non-fatal). */
@@ -400,8 +386,8 @@ async function excludeFromGit(repoRoot: string, pattern: string): Promise<void> 
 // DNS/TCP), so each source gets one implicit attempt per process. "Refresh"
 // always retries.
 const cloneAttempted = new Set<string>();
-// Isolated review worktrees have no local `.agents/skills` (gitignored, absent
-// in a fresh checkout), so codex reads skills straight from this global bare
+// Isolated review worktrees have no local installed skills (gitignored, absent
+// in a fresh checkout), so Cezar reads skills straight from this global bare
 // cache. A clone left by an earlier run — or one this long-running process
 // fetched hours ago — silently serves a stale template. Passive loads therefore
 // fetch on the first touch per process and then at most once per TTL, keeping

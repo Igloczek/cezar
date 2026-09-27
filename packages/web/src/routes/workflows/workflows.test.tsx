@@ -18,8 +18,8 @@ afterEach(() => {
 // ---- fixtures ----------------------------------------------------------------------------------
 
 const SKILLS: Skill[] = [
-  { name: 'om-fix', description: 'Fix the thing', body: '', path: '.ai/skills/om-fix.md', source: 'ai' },
-  { name: 'om-review', description: 'Review it', body: '', path: '~/.cez/skills/om-review.md', source: 'global' },
+  { name: 'om-fix', description: 'Fix the thing', body: '', path: '.agents/skills/om-fix/SKILL.md', source: 'project' },
+  { name: 'om-review', description: 'Review it', body: '', path: '/home/u/.codex/skills/om-review/SKILL.md', source: 'global' },
 ]
 
 const QUICK: WorkflowDef = {
@@ -182,16 +182,13 @@ describe('palette add / remove / the 8-step limit', () => {
     await screen.findByText('A workflow holds at most 8 steps.')
   })
 
-  // #374: the palette's empty state must mention the same discovery dirs as the Skills tab's,
-  // not just `.ai/skills/`.
-  it('an empty skill catalog explains every discovery dir, not just .ai/skills/', async () => {
+  it('an empty skill catalog explains automatic discovery without naming a directory', async () => {
     stubFetch({ 'GET /api/v1/skills': [() => jsonResponse([])] })
     renderAt('/workflows')
 
     const hint = await screen.findByText(/No skills yet/)
-    expect(hint.textContent).toContain('.ai/skills/')
-    expect(hint.textContent).toContain('.ai/cezar/skills/')
-    expect(hint.textContent).toContain('.agents/skills/')
+    expect(hint.textContent).toContain('install a skill for any coding agent')
+    expect(hint.textContent).not.toContain('.ai/skills/')
   })
 })
 

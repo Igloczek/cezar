@@ -65,9 +65,9 @@ beforeAll(async () => {
   git('config', 'user.email', 'e2e@cezar.test')
   git('config', 'user.name', 'cezar e2e')
   writeFileSync(join(dataRoot, 'README.md'), '# composer defaults fixture\n', 'utf8')
-  mkdirSync(join(dataRoot, '.ai/skills'), { recursive: true })
+  mkdirSync(join(dataRoot, '.agents/skills/interactive-review'), { recursive: true })
   writeFileSync(
-    join(dataRoot, '.ai/skills/interactive-review.md'),
+    join(dataRoot, '.agents/skills/interactive-review/SKILL.md'),
     '---\ndescription: Review a proposal with the user\ninteractive: true\n---\n\nAsk questions before writing the review.\n',
     'utf8',
   )

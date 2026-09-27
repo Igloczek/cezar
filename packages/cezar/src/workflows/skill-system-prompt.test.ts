@@ -8,10 +8,10 @@ describe('skillSystemPrompt — installed-path hint for worktree agents', () => 
   it('points an on-disk skill at its absolute installed directory', () => {
     const out = skillSystemPrompt({
       ...base,
-      source: 'agents',
-      path: '/home/u/Projects/app/.agents/skills/om-code-review/SKILL.md',
+      source: 'project',
+      path: '/home/u/Projects/app/.tabnine/agent/skills/om-code-review/SKILL.md',
     });
-    expect(out).toContain('Skill files are installed on disk at: /home/u/Projects/app/.agents/skills/om-code-review');
+    expect(out).toContain('Skill files are installed on disk at: /home/u/Projects/app/.tabnine/agent/skills/om-code-review');
     expect(out).toContain('references/*.md');
     // Body still present and last.
     expect(out.trimEnd().endsWith('Do the review.')).toBe(true);

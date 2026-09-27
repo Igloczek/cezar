@@ -10,9 +10,7 @@ import type { Skill, WorkflowDef } from '@open-mercato/cezar-api-client'
  *  are configured and cached per project even though their files live in a shared remote repo,
  *  so they belong with project skills. Only `global` comes from the user's home catalog. */
 const PROJECT_SKILL_SOURCES: ReadonlySet<Skill['source']> = new Set([
-  'ai',
-  'cezar',
-  'agents',
+  'project',
   'team',
 ])
 

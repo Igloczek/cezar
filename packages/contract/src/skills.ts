@@ -5,8 +5,8 @@ import { runRecordSchema } from './runs.ts';
 // ---- skills (`GET /skills`, `POST /skills/refresh`) ---------------------------------------
 
 /**
- * One discovered skill: repo (`.ai/skills`, `.ai/cezar/skills`), `npx skills` install dirs
- * (project + global), a configured team skills repo (spec 005), or the one built-in.
+ * One discovered SKILL.md: project or global skill directories, a configured
+ * team repo (spec 005), or the one built-in.
  */
 export const skillSchema = z.object({
   name: z.string(),
@@ -17,15 +17,13 @@ export const skillSchema = z.object({
   path: z.string(),
   /** `builtin`: the one skill cezar ships itself (`create-cezar-automation`), served only while
    *  GitHub automations are on and reachable (spec 2026-09-13-automations-from-prompt). */
-  source: z.enum(['ai', 'cezar', 'agents', 'global', 'team', 'builtin']),
+  source: z.enum(['project', 'global', 'team', 'builtin']),
   /** Team skills only: where the definition lives in its skills repo. */
   team: z
     .object({
       repo: z.string(),
       ref: z.string(),
       path: z.string(),
-      /** True for the `SKILL.md` convention — a whole directory (references/…). */
-      dir: z.boolean(),
       /**
        * The exact commit `ref` resolved to when the skill was read (#428).
        *

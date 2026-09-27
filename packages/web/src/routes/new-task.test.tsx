@@ -117,7 +117,7 @@ const PROVIDERS_NONE: ProviderStatusResponse = {
 }
 
 const SKILLS: Skill[] = [
-  { name: 'om-fix', description: 'Fix an issue end to end', body: '', path: '/p/om-fix.md', source: 'ai' },
+  { name: 'om-fix', description: 'Fix an issue end to end', body: '', path: '/p/om-fix.md', source: 'project' },
   { name: 'deploy', description: 'Deploy from anywhere', body: '', path: '/g/deploy.md', source: 'global' },
 ]
 

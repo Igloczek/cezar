@@ -20,7 +20,7 @@ import { AppRoutes } from '@/routes'
 
 const skill = (over: Partial<Skill> & Pick<Skill, 'name' | 'source'>): Skill => ({
   body: `# ${over.name}\n\nBody of ${over.name}.`,
-  path: `.ai/skills/${over.name}.md`,
+  path: `skills/${over.name}/SKILL.md`,
   ...over,
 })
 
@@ -32,8 +32,8 @@ const SKILLS: Skill[] = [
     path: '/home/u/.agents/skills/zebra-global/SKILL.md',
     description: 'A global skill',
   }),
-  skill({ name: 'om-fix', source: 'ai', description: 'Fix an issue end to end' }),
-  skill({ name: 'om-review', source: 'cezar', path: '.ai/cezar/skills/om-review.md' }),
+  skill({ name: 'om-fix', source: 'project', description: 'Fix an issue end to end' }),
+  skill({ name: 'om-review', source: 'project', path: '.claude/skills/om-review/SKILL.md' }),
 ]
 
 const WORKFLOWS: WorkflowsResponse = {
@@ -158,7 +158,7 @@ describe('the catalog list', () => {
     expect(rows[1]?.getAttribute('data-project')).toBe('true')
     expect(rows[2]?.hasAttribute('data-project')).toBe(false)
     // The tag says where each skill comes from.
-    expect(rows[0]?.querySelector('[data-slot="skill-source"]')?.textContent).toBe('ai')
+    expect(rows[0]?.querySelector('[data-slot="skill-source"]')?.textContent).toBe('project')
     expect(rows[2]?.querySelector('[data-slot="skill-source"]')?.textContent).toBe('global')
   })
 
@@ -169,7 +169,7 @@ describe('the catalog list', () => {
     await waitFor(() => expect(detail()).not.toBeNull())
     const pane = detail()!
     expect(pane.querySelector('h2')?.textContent).toBe('om-fix')
-    expect(pane.querySelector('[data-slot="skill-path"]')?.textContent).toContain('.ai/skills/om-fix.md')
+    expect(pane.querySelector('[data-slot="skill-path"]')?.textContent).toContain('skills/om-fix/SKILL.md')
     // `# om-fix` became a real heading — the body renders as markdown, not a <pre> dump.
     await waitFor(() =>
       expect(pane.querySelector('[data-slot="skill-body"] h1')?.textContent).toBe('om-fix'),
@@ -211,12 +211,11 @@ describe('the catalog list', () => {
     serve({ skills: [] })
     renderAt('/skills')
 
-    // #374: the hint must mention every project discovery dir, not just `.ai/skills/`.
+    // A new user does not need to know Cezar's legacy directories.
     await waitFor(() => {
       const text = document.querySelector('[data-slot="skill-rows"]')?.textContent ?? ''
-      expect(text).toContain('.ai/skills/')
-      expect(text).toContain('.ai/cezar/skills/')
-      expect(text).toContain('.agents/skills/')
+      expect(text).toContain('Install a skill for any coding agent')
+      expect(text).not.toContain('.ai/skills/')
     })
     // No skills → the bookmarklet panel is the default detail (legacy fallback rule).
     await waitFor(() => expect(document.querySelector('[data-slot="bookmarklet-panel"]')).not.toBeNull())

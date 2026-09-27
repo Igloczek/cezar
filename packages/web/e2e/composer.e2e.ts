@@ -12,7 +12,7 @@ import { AgentBrowser, cezarCli, fixtureServeEnv } from './agent-browser'
  * fixture: a real `cezar` (CEZ_DRY_RUN=1) on a real tmp git repo runs a real task through the
  * mock claude, whose reply carries no CEZ:DONE marker, so the run parks at `waiting` — the
  * exact state the composer exists for. What this spec proves is the full loop: type a reply
- * (with a `/` skill completion from this repo's own `.ai/skills`), send, and watch the
+ * (with a `/` skill completion from this repo's own `.agents/skills`), send, and watch the
  * transcript grow over SSE because the server accepted and persisted the message.
  *
  * Dictation: Chrome ships `webkitSpeechRecognition` natively, but driving the REAL recognizer
@@ -77,9 +77,9 @@ beforeAll(async () => {
 
   // One PROJECT skill — the `/` menu must list it first and bold, ahead of any skill the
   // machine happens to have globally (~/.claude/skills etc., which we cannot control here).
-  mkdirSync(join(dataRoot, '.ai/skills'), { recursive: true })
+  mkdirSync(join(dataRoot, '.agents/skills/lint-fix'), { recursive: true })
   writeFileSync(
-    join(dataRoot, '.ai/skills/lint-fix.md'),
+    join(dataRoot, '.agents/skills/lint-fix/SKILL.md'),
     '---\ndescription: Fix lint findings in the changed files\n---\n\nRun the linter and fix everything it reports.\n',
     'utf8',
   )
