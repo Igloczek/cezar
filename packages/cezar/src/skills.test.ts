@@ -140,7 +140,7 @@ describe('discoverSkills local entrypoints', () => {
     expect(skills.some((skill) => skill.name === 'agentic-setup')).toBe(false);
   });
 
-  it('follows npx-skills directory mirrors and deduplicates them by skill name', async () => {
+  it('follows linked skill directories and deduplicates them by skill name', async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), 'cezar-skills-'));
     tempDirs.push(repoRoot);
     const canonicalDir = join(repoRoot, '.agents/skills/om-example');

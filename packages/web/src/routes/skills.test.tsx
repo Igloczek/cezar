@@ -216,7 +216,7 @@ describe('the catalog list', () => {
       const text = document.querySelector('[data-slot="skill-rows"]')?.textContent ?? ''
       expect(text).toContain('.ai/skills/')
       expect(text).toContain('.ai/cezar/skills/')
-      expect(text).toContain('npx skills')
+      expect(text).toContain('Skills already present in this project or your home')
     })
     // No skills → the bookmarklet panel is the default detail (legacy fallback rule).
     await waitFor(() => expect(document.querySelector('[data-slot="bookmarklet-panel"]')).not.toBeNull())

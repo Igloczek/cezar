@@ -34,9 +34,8 @@ function ProjectDirList() {
 export function SkillEmptyHint() {
   return (
     <>
-      No skills yet. Add a Markdown file to <ProjectDirList />, or install a skill with{' '}
-      <Path>npx skills</Path>. Skills installed in your home and skills from a team repo appear
-      here too — try Refresh.
+      No skills yet. Add a Markdown file to <ProjectDirList />. Skills already present in this
+      project or your home, and skills from a team repo, appear here too — try Refresh.
     </>
   )
 }
@@ -46,8 +45,8 @@ export function SkillEmptyHint() {
 export function SkillEmptyHintCompact() {
   return (
     <>
-      No skills yet — add a Markdown file to <ProjectDirList /> or install one with{' '}
-      <Path>npx skills</Path>.
+      No skills yet — add a Markdown file to <ProjectDirList />. Existing project, home, and team
+      skills appear here too.
     </>
   )
 }

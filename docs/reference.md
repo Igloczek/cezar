@@ -26,8 +26,9 @@ Three words, no jargon — **task**, **skill**, **chain**:
   the agent gets each one as a real file on disk), or send follow-up messages into
   the live session while it works.
 - 📖 **Skills** are Markdown playbooks. Put them in `.ai/skills/` or
-  `.ai/cezar/skills/`, install them with `npx skills`, or pull them from a
-  shared **team skills repo** (a bare git clone cached globally in `~/.cache/cez/`).
+  `.ai/cezar/skills/`. Cezar also finds existing `skills` directories in the
+  project and your home, or pulls skills from a shared **team skills repo**
+  (a bare git clone cached globally in `~/.cache/cez/`).
   A workflow step references one by `skill: <name>` and its body becomes the
   agent's extra system prompt — so you shape *how* the agent reasons without touching code.
 - 🔗 **Chains (workflows)** stitch steps into a pipeline: agent steps plus shell
