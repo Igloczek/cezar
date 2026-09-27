@@ -76,7 +76,7 @@ async function findSkillDirs(
   return found.sort();
 }
 
-async function globalSkillDirs(): Promise<string[]> {
+export async function discoverGlobalSkillDirs(): Promise<string[]> {
   const home = homedir();
   const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(home, '.config');
   const homeEntries = await readdir(home, { withFileTypes: true }).catch(() => []);
@@ -116,7 +116,7 @@ async function globalSkillDirs(): Promise<string[]> {
  */
 export async function discoverSkills(repoRoot: string): Promise<Skill[]> {
   const projectSkillDirs = await discoverProjectSkillDirs(repoRoot);
-  const globalDirs = await globalSkillDirs();
+  const globalDirs = await discoverGlobalSkillDirs();
   const [lists, gatedRepos, uiState] = await Promise.all([
     Promise.all([
       ...projectSkillDirs.map((dir) => readSkillFiles(dir, 'project')),

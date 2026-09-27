@@ -11,6 +11,7 @@ it('exposes complete installed skills to native harness directories in a worktre
   const repo = await mkdtemp(join(tmpdir(), 'cezar-native-skills-'));
   const worktree = `${repo}-worktree`;
   const outside = `${repo}-outside`;
+  const previousXdg = process.env.XDG_CONFIG_HOME;
   try {
     execFileSync('git', ['init', '-q', '-b', 'main', repo]);
     execFileSync('git', ['-C', repo, '-c', 'user.name=Test', '-c', 'user.email=test@example.com',
@@ -21,6 +22,8 @@ it('exposes complete installed skills to native harness directories in a worktre
     await mkdir(join(repo, '.empty/skills'), { recursive: true });
     await mkdir(join(repo, '.escape/skills'), { recursive: true });
     await mkdir(outside);
+    process.env.XDG_CONFIG_HOME = join(outside, 'config');
+    await mkdir(join(outside, 'config/goose/skills'), { recursive: true });
     await symlink(outside, join(worktree, '.escape'), 'dir');
     await writeFile(join(source, 'SKILL.md'), '---\nname: alpha\ndescription: Uses beta\n---\nUse beta and read references/rules.md');
     await writeFile(join(source, 'references/rules.md'), 'Full reference');
@@ -31,7 +34,7 @@ it('exposes complete installed skills to native harness directories in a worktre
 
     await exposeNativeSkills(repo, worktree, [skill]);
 
-    for (const root of ['.agents/skills', '.claude/skills', '.pi/skills', '.future/skills', '.empty/skills']) {
+    for (const root of ['.agents/skills', '.claude/skills', '.pi/skills', '.future/skills', '.empty/skills', '.goose/skills']) {
       expect(await readFile(join(worktree, root, 'alpha/SKILL.md'), 'utf8')).toContain('Use beta');
       expect(await readFile(join(worktree, root, 'alpha/references/rules.md'), 'utf8')).toBe('Full reference');
     }
@@ -43,6 +46,8 @@ it('exposes complete installed skills to native harness directories in a worktre
       .toContain('.future/skills/alpha/');
     expect((await discoverSkills(worktree)).filter((entry) => entry.path.startsWith(worktree))).toEqual([]);
   } finally {
+    if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+    else process.env.XDG_CONFIG_HOME = previousXdg;
     await rm(worktree, { recursive: true, force: true });
     await rm(repo, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });

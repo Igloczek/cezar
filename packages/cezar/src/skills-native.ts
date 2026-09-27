@@ -1,7 +1,8 @@
 import { cp, lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { discoverProjectSkillDirs, type Skill } from './skills.ts';
+import { discoverGlobalSkillDirs, discoverProjectSkillDirs, type Skill } from './skills.ts';
 import { excludeFromGit, getTeamSkillsCached, materializeSkillDir } from './skills-remote.ts';
 
 /**
@@ -24,6 +25,31 @@ export async function exposeNativeSkills(repoRoot: string, cwd: string, skills: 
   for (const dir of await discoverProjectSkillDirs(repoRoot)) {
     const parts = relative(repoRoot, dir).split(sep);
     if (parts[0] !== '..') roots.add(join(cwd, ...parts));
+  }
+  // Existing global skill locations reveal more harness layouts without an
+  // agent-name registry. Mirror their relative layout into the task worktree.
+  const home = homedir();
+  const bases = [
+    process.env.XDG_CONFIG_HOME?.trim() || join(home, '.config'),
+    process.env.APPDATA,
+    process.env.LOCALAPPDATA,
+    home,
+  ].filter((path): path is string => !!path && isAbsolute(path)).sort((a, b) => b.length - a.length);
+  for (const dir of await discoverGlobalSkillDirs()) {
+    for (const base of bases) {
+      const rel = relative(base, dir);
+      if (!rel || rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) continue;
+      const parts = rel.split(sep);
+      if (parts.at(-1) !== 'skills') break;
+      if (parts.length === 1) {
+        roots.add(join(cwd, 'skills'));
+      } else {
+        const owner = parts[0]!.startsWith('.') ? parts[0]! : `.${parts[0]}`;
+        roots.add(join(cwd, owner, ...parts.slice(1)));
+        roots.add(join(cwd, owner, 'skills'));
+      }
+      break;
+    }
   }
   // A tracked skills root can itself be a symlink into the user's home.
   // Keep Cezar's generated links inside this run's checkout.

@@ -29,7 +29,9 @@ Three words, no jargon — **task**, **skill**, **chain**:
   coding agents in the project or your home, or pulls them from a shared **team skills repo**
   (a bare git clone cached globally in `~/.cache/cez/`).
   A workflow step references one by `skill: <name>`; Cezar exposes the complete
-  skill directory and the agent loads it with its own skill support.
+  skill directory and the agent loads it with its own skill support. It mirrors
+  existing home skill layouts into task worktrees (for example
+  `~/.config/goose/skills` → `.goose/skills`) without requiring a harness setting.
 - 🔗 **Chains (workflows)** stitch steps into a pipeline: agent steps plus shell
   checks, with bounded `onFail` retry loops. Write the YAML yourself, build one by
   drag-ordering skills in the **Workflows** tab, or press **Plan first** and let the
