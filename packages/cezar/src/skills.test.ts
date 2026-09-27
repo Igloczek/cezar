@@ -155,6 +155,42 @@ describe('discoverSkills local entrypoints', () => {
     expect(skills).toHaveLength(1);
     expect(skills[0]?.source).toBe('agents');
   });
+
+  it('discovers installed skills without knowing the agent name', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'cezar-skills-'));
+    tempDirs.push(repoRoot);
+    const skillsDir = join(repoRoot, '.future-agent/skills/my-skill');
+    await mkdir(skillsDir, { recursive: true });
+    await writeFile(join(skillsDir, 'SKILL.md'), '# Any agent');
+
+    const skills = await discoverSkills(repoRoot);
+    expect(skills.find((skill) => skill.name === 'my-skill')).toMatchObject({
+      source: 'agents',
+      path: join(skillsDir, 'SKILL.md'),
+    });
+  });
+
+  it('discovers skills in an arbitrary configured global home', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'cezar-skills-'));
+    tempDirs.push(repoRoot);
+    const configDir = await mkdtemp(join(tmpdir(), 'cezar-agent-home-'));
+    tempDirs.push(configDir);
+    const skillDir = join(configDir, 'skills', 'my-global-skill');
+    await mkdir(skillDir, { recursive: true });
+    await writeFile(join(skillDir, 'SKILL.md'), '# Global agent skill');
+    const previous = process.env.FUTURE_AGENT_CONFIG_DIR;
+    process.env.FUTURE_AGENT_CONFIG_DIR = configDir;
+    try {
+      const skills = await discoverSkills(repoRoot);
+      expect(skills.find((skill) => skill.name === 'my-global-skill')).toMatchObject({
+        source: 'global',
+        path: join(skillDir, 'SKILL.md'),
+      });
+    } finally {
+      if (previous === undefined) delete process.env.FUTURE_AGENT_CONFIG_DIR;
+      else process.env.FUTURE_AGENT_CONFIG_DIR = previous;
+    }
+  });
 });
 
 /**

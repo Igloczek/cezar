@@ -3050,7 +3050,12 @@ export class RunManager {
 
   /** Shared live-session delivery. Synthetic scheduler prompts reuse lifecycle
    * bookkeeping without masquerading as user-authored transcript messages. */
-  private deliverMessage(runId: string, content: PastedContent[], userAuthored: boolean): boolean {
+  private deliverMessage(
+    runId: string,
+    content: PastedContent[],
+    userAuthored: boolean,
+    preparedTeamSkillDir?: string | null,
+  ): boolean {
     const state = this.active.get(runId);
     if (!state?.session?.open || state.cancelled) return false;
     // A parked in-place run gave the working-tree lease back (`parkRepoRoot`). It must own the
@@ -3076,6 +3081,18 @@ export class RunManager {
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
       .join('\n');
+    const slashSkill = userAuthored ? registrySlashSkill(text, state.skills ?? [])?.skill : undefined;
+    if (slashSkill?.source === 'team' && slashSkill.team?.dir && preparedTeamSkillDir === undefined) {
+      // Live messages have a synchronous acceptance API. Prepare companion files
+      // before delivery, then use the same path as opening and continuation turns.
+      void materializeSkillDir(state.cwd, slashSkill)
+        .catch(() => null)
+        .then((dir) => {
+          if (this.deliverMessage(runId, content, userAuthored, dir) || this.enqueueMessage(runId, content)) return;
+          this.deferMessage(runId, content);
+        });
+      return true;
+    }
     // Persist the attachments so the thread can render them (not just count them) — the same
     // on-disk store + `/images/` route the agent's own screenshots use. `pasted` prefix marks
     // these as user attachments (vs. agent tool screenshots) on disk (#357).
@@ -3101,19 +3118,8 @@ export class RunManager {
     // at all for a non-image attachment (#950), which is why `contentBlocksOf` drops file blocks
     // here rather than letting one reach a backend that has no idea what it is.
     const blocks = contentBlocksOf(content);
-    const slashSkill = userAuthored ? registrySlashSkill(text, state.skills ?? [])?.skill : undefined;
-    const teamSkillDir =
-      slashSkill?.source === 'team' &&
-      slashSkill.team?.dir &&
-      slashSkill.name !== '.' &&
-      slashSkill.name !== '..' &&
-      !/[\\/]/.test(slashSkill.name)
-        ? join(state.cwd, '.agents', 'skills', slashSkill.name)
-        : undefined;
-    const installedDir =
-      teamSkillDir && existsSync(join(teamSkillDir, 'SKILL.md')) ? teamSkillDir : undefined;
     const expanded = userAuthored
-      ? expandRegistrySlashSkill(blocks, state.skills ?? [], installedDir)
+      ? expandRegistrySlashSkill(blocks, state.skills ?? [], preparedTeamSkillDir ?? undefined)
       : blocks;
     const deliverable = persisted.length
       ? [...expanded, pastedAttachmentsNote(persisted, this.attachmentLibraryHint(persisted) ??
@@ -4137,15 +4143,14 @@ export class RunManager {
         // numeric task such as "432" still gives the model enough context to
         // describe the work — and therefore derive a useful title (#432).
         // Directory team skills (SKILL.md + references/) get materialized
-        // into <cwd>/.agents/skills/<name>/ — the portable skill directory —
-        // so every backend can read companion files from the same path.
+        // under Cezar's ignored run data; every backend receives its absolute path.
         if (skill.source === 'team' && skill.team?.dir) {
           selectedSkillDir = (await materializeSkillDir(state.cwd, skill).catch(() => null)) ?? undefined;
           if (selectedSkillDir) {
             emit({
               type: 'note',
               stepId: step.id,
-              message: `team skill "${skill.name}" materialized to .agents/skills/${skill.name}/`,
+              message: `team skill "${skill.name}" materialized to ${selectedSkillDir}`,
             });
           }
         }
@@ -5260,11 +5265,11 @@ export function makeRunTitle(task: string, workflow: WorkflowDef): string {
  *
  * For an on-disk skill we also hand the agent the ABSOLUTE directory of the
  * installed copy. A run executes in an isolated worktree that has no local
- * `.agents/skills` (gitignored, absent in a fresh checkout), so without this
+ * installed skill directories (gitignored, absent in a fresh checkout), so without this
  * the agent cannot read the skill's companion files (`references/*.md`) — or,
  * worse, reads a stale copy materialized from the team-repo cache. The path
  * resolves against the MAIN project root (`discoverSkills(repoRoot)`), i.e. the
- * current `npx skills`-installed copy, so a worktree agent and the main
+ * current installed copy, so a worktree agent and the main
  * checkout read the exact same, up-to-date files. A materialized team skill
  * passes its worktree directory explicitly (see the call site).
  */

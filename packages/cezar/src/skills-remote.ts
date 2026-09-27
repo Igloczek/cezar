@@ -335,8 +335,9 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
 
 /**
  * Copy a directory skill (SKILL.md + references/…) out of the bare clone into
- * the portable `<repoRoot>/.agents/skills/<name>/`, and keep it out of the
- * user's git via `.git/info/exclude`. Returns the installed directory, or null
+ * `<repoRoot>/.ai/cezar/tmp/skills/<name>/`. Cezar passes that absolute path
+ * to any backend, so no agent-specific installation or symlinks are needed.
+ * Keep it out of the user's git via `.git/info/exclude`. Returns the directory, or null
  * when there is nothing to materialize (not a directory skill, no clone…).
  */
 export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<string | null> {
@@ -358,7 +359,7 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
   const ls = await git(['ls-tree', '-r', '--name-only', ref, '--', srcDir], LIST_TIMEOUT_MS, bareDir);
   if (!ls.ok) return null;
 
-  const destDir = join(repoRoot, '.agents', 'skills', skill.name);
+  const destDir = join(repoRoot, '.ai', 'cezar', 'tmp', 'skills', skill.name);
   let wrote = 0;
   for (const file of ls.stdout.split('\n').filter(Boolean)) {
     const rel = file.slice(srcDir.length + 1);
@@ -372,7 +373,7 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
     wrote++;
   }
   if (wrote === 0) return null;
-  await excludeFromGit(repoRoot, `.agents/skills/${skill.name}/`);
+  await excludeFromGit(repoRoot, '.ai/cezar/tmp/');
   return destDir;
 }
 
@@ -409,8 +410,8 @@ async function excludeFromGit(repoRoot: string, pattern: string): Promise<void> 
 // DNS/TCP), so each source gets one implicit attempt per process. "Refresh"
 // always retries.
 const cloneAttempted = new Set<string>();
-// Isolated review worktrees have no local `.agents/skills` (gitignored, absent
-// in a fresh checkout), so codex reads skills straight from this global bare
+// Isolated review worktrees have no local installed skills (gitignored, absent
+// in a fresh checkout), so Cezar reads skills straight from this global bare
 // cache. A clone left by an earlier run — or one this long-running process
 // fetched hours ago — silently serves a stale template. Passive loads therefore
 // fetch on the first touch per process and then at most once per TTL, keeping

@@ -2,19 +2,15 @@
  * The "no skills yet" copy shared by every empty state that tells a user where to drop skill
  * files — the Skills tab (`routes/skills.tsx`) and the workflow builder's skill palette
  * (`routes/workflows/workflows.tsx`). #374 (follow-up to #342): both used to mention only
- * `.ai/skills/`, while discovery also scans `.ai/cezar/skills/`, the portable
- * `.agents/skills/`, agent-specific project directories, global skill roots, and the team skills
- * repo (`src/skills.ts`). One shared list, so the two SURFACES render the same copy.
+ * `.ai/skills/`, while discovery also scans `.ai/cezar/skills/`, installed
+ * project and global skills, and the team skills repo (`src/skills.ts`).
  *
- * The list below is a hand-copy of the server's portable discovery order, which lives in another
- * process (`SKILL_DIRS` in `src/skills.ts`) and cannot be imported into the bundle.
- * `test/unit/skill-dirs.test.ts` keeps those paths in sync; agent-specific directories are found
- * dynamically and are intentionally not enumerated here.
+ * The list below is a hand-copy of Cezar's own paths (`SKILL_DIRS` in `src/skills.ts`).
+ * `test/unit/skill-dirs.test.ts` keeps it in sync.
  */
 
-/** Portable local project directories, in the server's precedence order. Agent-specific
- *  directories are discovered dynamically. Pinned by `test/unit/skill-dirs.test.ts`. */
-const SKILL_PROJECT_DIRS = ['.ai/cezar/skills/', '.ai/skills/', '.agents/skills/'] as const
+/** Cezar's local project directories, in server precedence order. */
+const SKILL_PROJECT_DIRS = ['.ai/cezar/skills/', '.ai/skills/'] as const
 
 function Path({ children }: { children: string }) {
   return <span className="font-mono">{children}</span>
@@ -38,10 +34,9 @@ function ProjectDirList() {
 export function SkillEmptyHint() {
   return (
     <>
-      No skills yet. Drop Markdown files into <ProjectDirList /> (agent-specific skill directories
-      are discovered too) — optional frontmatter: <Path>name</Path>, <Path>description</Path>.
-      Global (<Path>~/.agents/skills</Path> or the agent's configured skills directory) and
-      team-repo skills appear here too — try Refresh.
+      No skills yet. Add a Markdown file to <ProjectDirList />, or install a skill with{' '}
+      <Path>npx skills</Path>. Skills installed in your home and skills from a team repo appear
+      here too — try Refresh.
     </>
   )
 }
@@ -51,8 +46,8 @@ export function SkillEmptyHint() {
 export function SkillEmptyHintCompact() {
   return (
     <>
-      No skills yet — drop Markdown files into <ProjectDirList /> (or a global/team-repo skill
-      source).
+      No skills yet — add a Markdown file to <ProjectDirList /> or install one with{' '}
+      <Path>npx skills</Path>.
     </>
   )
 }

@@ -191,7 +191,7 @@ describe('palette add / remove / the 8-step limit', () => {
     const hint = await screen.findByText(/No skills yet/)
     expect(hint.textContent).toContain('.ai/skills/')
     expect(hint.textContent).toContain('.ai/cezar/skills/')
-    expect(hint.textContent).toContain('.agents/skills/')
+    expect(hint.textContent).toContain('npx skills')
   })
 })
 

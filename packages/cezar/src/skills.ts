@@ -1,18 +1,17 @@
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve, basename, dirname, extname } from 'node:path';
+import { join, resolve, basename, dirname, extname, isAbsolute } from 'node:path';
 import { gatedSkillsRepos } from './config.ts';
 import { getTeamSkillsCached } from './skills-remote.ts';
 import { readWorkspaceUiState } from './workspace/ui-state.ts';
 import { builtinSkills } from './automations/builtin-skill.ts';
-import { agentHomePaths } from './paths.ts';
 
 /**
  * A skill is a Markdown file with optional YAML-ish frontmatter (`name`,
  * `description`). Discovered from the repo's `.ai/skills/` (shared with other
- * agent tooling), `.ai/cezar/skills/` (cez-local), the portable `npx skills`
- * install dir (`.agents/skills`), other agent `skills` dirs, and configured
- * team skills repos (spec 005 — bare clones, no checkout).
+ * agent tooling), `.ai/cezar/skills/` (cez-local), existing `skills`
+ * directories in the project or home, and configured team skills repos
+ * (spec 005 — bare clones, no checkout).
  * Adapted from @cezar/core's skill-catalog.
  */
 export interface Skill {
@@ -37,16 +36,11 @@ export interface Skill {
   };
 }
 
-/* Precedence order — earlier dirs win name collisions. `.agents/skills` is
-   the portable canonical location; harness-specific mirrors are discovered
-   from the filesystem instead of maintaining a list of supported agents.
-
-   Exported for the drift guard in `test/unit/skill-dirs.test.ts` (#374): it
-   pins these portable paths, which the cockpit names in its empty-state hint. */
+/* Cezar's own paths win name collisions. Installed agent skills are discovered
+   from the filesystem, without a list of agent names or install locations. */
 export const SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
   { dir: '.ai/cezar/skills', source: 'cezar' },
   { dir: '.ai/skills', source: 'ai' },
-  { dir: '.agents/skills', source: 'agents' },
 ];
 
 /** Find skill roots directly below directories without enumerating harness names. */
@@ -61,22 +55,23 @@ async function childSkillDirs(
     .sort();
 }
 
-function globalSkillDirs(): string[] {
+async function globalSkillDirs(): Promise<string[]> {
   const home = homedir();
   const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(home, '.config');
-  return [...new Set([
-    join(home, '.agents', 'skills'),
-    join(configHome, 'agents', 'skills'),
-    // Reuse Cezar's configured default runner homes (including CODEX_HOME and
-    // XDG_CONFIG_HOME) without treating named account/profile dirs as libraries.
-    ...Object.values(agentHomePaths()).map((agentHome) => join(agentHome, 'skills')),
-  ])];
+  const roots = [
+    ...await childSkillDirs(home),
+    ...await childSkillDirs(configHome),
+    ...Object.entries(process.env)
+      .filter(([key, value]) => /(?:_HOME|_CONFIG_DIR)$/.test(key) && value && isAbsolute(value))
+      .map(([, value]) => join(value!, 'skills')),
+  ];
+  return [...new Set(roots)];
 }
 
 /**
  * Discover the merged skill catalog for a repo. Name collisions resolve
- * local-first: `.ai/cezar/skills` → `.ai/skills` → `.agents/skills` → other
- * top-level project agent skill roots → global skills → team repo
+ * local-first: `.ai/cezar/skills` → `.ai/skills` → installed project skills
+ * → installed global skills → team repo
  * ("the user's repo is the source of truth"). Missing directories are fine —
  * an empty catalog is fully supported (steps fall back to their plain
  * prompt). Team skills come from the in-process cache; the first call starts
@@ -98,13 +93,14 @@ function globalSkillDirs(): string[] {
 export async function discoverSkills(repoRoot: string): Promise<Skill[]> {
   const projectSkillDirs = await childSkillDirs(
     repoRoot,
-    new Set(['.ai', '.agents', '.git', 'node_modules']),
+    new Set(['.ai', '.git', 'node_modules']),
   );
+  const globalDirs = await globalSkillDirs();
   const [lists, gatedRepos, uiState] = await Promise.all([
     Promise.all([
       ...SKILL_DIRS.map(({ dir, source }) => readMarkdownSkills(resolve(repoRoot, dir), source)),
       ...projectSkillDirs.map((dir) => readMarkdownSkills(dir, 'agents')),
-      ...globalSkillDirs().map((dir) => readMarkdownSkills(dir, 'global')),
+      ...globalDirs.map((dir) => readMarkdownSkills(dir, 'global')),
     ]),
     gatedSkillsRepos(repoRoot),
     readWorkspaceUiState(),

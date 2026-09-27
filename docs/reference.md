@@ -25,8 +25,8 @@ Three words, no jargon — **task**, **skill**, **chain**:
   screenshots, PDFs, `.txt` or `.md` files to the task (paperclip, ⌘V or drag-drop;
   the agent gets each one as a real file on disk), or send follow-up messages into
   the live session while it works.
-- 📖 **Skills** are Markdown playbooks. Drop them in `.agents/skills/` for a
-  portable location, `.ai/skills/` or `.ai/cezar/skills/`, or pull them from a
+- 📖 **Skills** are Markdown playbooks. Put them in `.ai/skills/` or
+  `.ai/cezar/skills/`, install them with `npx skills`, or pull them from a
   shared **team skills repo** (a bare git clone cached globally in `~/.cache/cez/`).
   A workflow step references one by `skill: <name>` and its body becomes the
   agent's extra system prompt — so you shape *how* the agent reasons without touching code.
