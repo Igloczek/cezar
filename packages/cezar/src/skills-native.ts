@@ -1,6 +1,6 @@
-import { cp, lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, readFile, readlink, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { discoverProjectSkillDirs, type Skill } from './skills.ts';
 import { excludeFromGit, getTeamSkillsCached, materializeSkillDir } from './skills-remote.ts';
 
@@ -24,6 +24,11 @@ export async function exposeNativeSkills(repoRoot: string, cwd: string, skills: 
   for (const dir of await discoverProjectSkillDirs(repoRoot)) {
     const parts = relative(repoRoot, dir).split(sep);
     if (parts[0] !== '..') roots.add(join(cwd, ...parts));
+  }
+  // A tracked skills root can itself be a symlink into the user's home.
+  // Keep Cezar's generated links inside this run's checkout.
+  for (const root of roots) {
+    if (!await staysInsideWorktree(root, cwd)) roots.delete(root);
   }
 
   for (const skill of allSkills) {
@@ -91,4 +96,19 @@ export async function exposeNativeSkills(repoRoot: string, cwd: string, skills: 
     ignores.push(`/${relative(cwd, file).split(sep).join('/')}`);
   }
   await excludeFromGit(cwd, ignores);
+}
+
+async function staysInsideWorktree(path: string, cwd: string): Promise<boolean> {
+  const base = await realpath(cwd);
+  let candidate = path;
+  for (;;) {
+    const actual = await realpath(candidate).catch(() => null);
+    if (actual) {
+      const rel = relative(base, actual);
+      return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+    }
+    const parent = dirname(candidate);
+    if (parent === candidate) return false;
+    candidate = parent;
+  }
 }
