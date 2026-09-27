@@ -335,21 +335,30 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
 
 /**
  * Copy a directory skill (SKILL.md + references/…) out of the bare clone into
- * `<repoRoot>/.claude/skills/<name>/` so claude sees the references on disk,
- * and keep it out of the user's git via `.git/info/exclude`. Returns false
+ * the portable `<repoRoot>/.agents/skills/<name>/`, and keep it out of the
+ * user's git via `.git/info/exclude`. Returns the installed directory, or null
  * when there is nothing to materialize (not a directory skill, no clone…).
  */
-export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<boolean> {
-  if (!skill.team?.dir || !skill.team.path.endsWith('SKILL.md')) return false;
+export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<string | null> {
+  if (
+    !skill.team?.dir ||
+    !skill.team.path.endsWith('SKILL.md') ||
+    !skill.name ||
+    skill.name === '.' ||
+    skill.name === '..' ||
+    /[\\/]/.test(skill.name)
+  ) {
+    return null;
+  }
   const bareDir = bareDirFor(skill.team.repo);
-  if (!existsSync(join(bareDir, 'HEAD'))) return false;
+  if (!existsSync(join(bareDir, 'HEAD'))) return null;
   const ref = await resolveRef(bareDir, skill.team.ref);
-  if (ref === null) return false;
+  if (ref === null) return null;
   const srcDir = skill.team.path.slice(0, -'/SKILL.md'.length);
   const ls = await git(['ls-tree', '-r', '--name-only', ref, '--', srcDir], LIST_TIMEOUT_MS, bareDir);
-  if (!ls.ok) return false;
+  if (!ls.ok) return null;
 
-  const destDir = join(repoRoot, '.claude', 'skills', skill.name);
+  const destDir = join(repoRoot, '.agents', 'skills', skill.name);
   let wrote = 0;
   for (const file of ls.stdout.split('\n').filter(Boolean)) {
     const rel = file.slice(srcDir.length + 1);
@@ -362,9 +371,9 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
     await writeFile(target, show.stdout, 'utf8');
     wrote++;
   }
-  if (wrote === 0) return false;
-  await excludeFromGit(repoRoot, `.claude/skills/${skill.name}/`);
-  return true;
+  if (wrote === 0) return null;
+  await excludeFromGit(repoRoot, `.agents/skills/${skill.name}/`);
+  return destDir;
 }
 
 /** Append a pattern to git's `info/exclude` (idempotent, non-fatal). */

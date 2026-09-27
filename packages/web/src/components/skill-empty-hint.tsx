@@ -2,22 +2,18 @@
  * The "no skills yet" copy shared by every empty state that tells a user where to drop skill
  * files — the Skills tab (`routes/skills.tsx`) and the workflow builder's skill palette
  * (`routes/workflows/workflows.tsx`). #374 (follow-up to #342): both used to mention only
- * `.ai/skills/`, while discovery also scans `.ai/cezar/skills/`, `.agents/skills/` (+ its
- * per-agent mirrors, e.g. `.claude/skills/`), the global `~/.agents/skills` /
- * `~/.claude/skills`, and the team skills repo (`src/skills.ts`). One shared list, so the two
- * SURFACES render the same copy.
+ * `.ai/skills/`, while discovery also scans `.ai/cezar/skills/`, the portable
+ * `.agents/skills/`, agent-specific project directories, global skill roots, and the team skills
+ * repo (`src/skills.ts`). One shared list, so the two SURFACES render the same copy.
  *
- * That is all this module can guarantee on its own: the list below is a hand-copy of the
- * server's actual discovery order, which lives in another process (`SKILL_DIRS` in
- * `src/skills.ts`) and cannot be imported into the bundle. `test/unit/skill-dirs.test.ts` pins
- * the server's list against the constant below, so adding a discovery dir there fails that
- * suite and points here instead of leaving this copy quietly wrong.
+ * The list below is a hand-copy of the server's portable discovery order, which lives in another
+ * process (`SKILL_DIRS` in `src/skills.ts`) and cannot be imported into the bundle.
+ * `test/unit/skill-dirs.test.ts` keeps those paths in sync; agent-specific directories are found
+ * dynamically and are intentionally not enumerated here.
  */
 
-/** Local project directories, in the server's precedence order — `src/skills.ts`'s SKILL_DIRS
- *  minus the per-agent mirrors (`.claude/skills` & co.), which the copy folds into one "agent
- *  mirrors like …" mention rather than listing five times. Pinned by
- *  `test/unit/skill-dirs.test.ts`; keep the two in step. */
+/** Portable local project directories, in the server's precedence order. Agent-specific
+ *  directories are discovered dynamically. Pinned by `test/unit/skill-dirs.test.ts`. */
 const SKILL_PROJECT_DIRS = ['.ai/cezar/skills/', '.ai/skills/', '.agents/skills/'] as const
 
 function Path({ children }: { children: string }) {
@@ -42,10 +38,10 @@ function ProjectDirList() {
 export function SkillEmptyHint() {
   return (
     <>
-      No skills yet. Drop Markdown files into <ProjectDirList /> (agent mirrors like{' '}
-      <Path>.claude/skills/</Path> work too) — optional frontmatter: <Path>name</Path>,{' '}
-      <Path>description</Path>. Global (<Path>~/.agents/skills</Path>) and team-repo skills
-      appear here too — try Refresh.
+      No skills yet. Drop Markdown files into <ProjectDirList /> (agent-specific skill directories
+      are discovered too) — optional frontmatter: <Path>name</Path>, <Path>description</Path>.
+      Global (<Path>~/.agents/skills</Path> or the agent's configured skills directory) and
+      team-repo skills appear here too — try Refresh.
     </>
   )
 }
