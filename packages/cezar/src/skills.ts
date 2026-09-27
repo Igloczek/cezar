@@ -1,6 +1,6 @@
-import { readdir, readFile, realpath, stat } from 'node:fs/promises';
+import { readdir, readFile, readlink, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, basename, dirname, isAbsolute } from 'node:path';
+import { join, basename, dirname, isAbsolute, resolve, sep } from 'node:path';
 import { gatedSkillsRepos } from './config.ts';
 import { getTeamSkillsCached } from './skills-remote.ts';
 import { readWorkspaceUiState } from './workspace/ui-state.ts';
@@ -115,11 +115,7 @@ async function globalSkillDirs(): Promise<string[]> {
  * picker, planner, runner.
  */
 export async function discoverSkills(repoRoot: string): Promise<Skill[]> {
-  const projectSkillDirs = await findSkillDirs(
-    repoRoot,
-    4,
-    new Set(['.ai', '.git', 'node_modules']),
-  );
+  const projectSkillDirs = await discoverProjectSkillDirs(repoRoot);
   const globalDirs = await globalSkillDirs();
   const [lists, gatedRepos, uiState] = await Promise.all([
     Promise.all([
@@ -145,6 +141,11 @@ export async function discoverSkills(repoRoot: string): Promise<Skill[]> {
   }
   merged.sort((a, b) => a.name.localeCompare(b.name));
   return merged;
+}
+
+/** Existing project skill roots, including empty roots used by other agents. */
+export function discoverProjectSkillDirs(repoRoot: string): Promise<string[]> {
+  return findSkillDirs(repoRoot, 4, new Set(['.ai', '.git', 'node_modules']));
 }
 
 /**
@@ -224,6 +225,8 @@ async function skillEntryPaths(
     let isDir = entry.isDirectory();
     if (entry.isSymbolicLink()) {
       try {
+        const target = resolve(dirname(path), await readlink(path));
+        if (target.includes(`${sep}.ai${sep}cezar${sep}tmp${sep}native-skills${sep}`)) continue;
         isDir = (await stat(path)).isDirectory(); // stat follows the link
       } catch {
         continue; // dangling symlink

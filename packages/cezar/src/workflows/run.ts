@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import {
   parseAskMarker,
   parseAskMarkerResult,
@@ -42,9 +42,10 @@ import {
 } from '@open-mercato/cezar-contract';
 import type { AgentEvent, ContentBlock } from '../core/agent-runner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
+import { exposeNativeSkills } from '../skills-native.ts';
+import { waitForTeamSkills } from '../skills-remote.ts';
 import { automationsReachable } from '../automations/builtin-skill.ts';
 import { AUTOMATIONS_PROMPT } from '../automations/prompts.ts';
-import { materializeSkillDir } from '../skills-remote.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
@@ -567,8 +568,8 @@ export interface StartRunInput {
  * the per-run override (`POST /api/runs` `systemPrompt`) REPLACES the
  * `config.json` default — they are the same knob at two scopes, so the more
  * specific one wins outright; they never concatenate. Whichever wins is
- * ADDITIVE to the skill body and the handoff contract, which always ride
- * along (see `composeSystemPrompt`). Blank strings count as unset.
+ * ADDITIVE to the handoff contract; skills are loaded by the native harness.
+ * Blank strings count as unset.
  */
 export function resolveExtraSystemPrompt(
   override: string | undefined,
@@ -578,11 +579,8 @@ export function resolveExtraSystemPrompt(
 }
 
 /**
- * Joins the parts of one agent step's system prompt in fixed order — skill
- * body (most task-specific), then the run's extra prompt (user guidance, can
- * amend the skill), then the handoff contract (always last, never optional in
- * practice). Blank parts drop out; survivors join with the same `\n\n---\n\n`
- * divider the skill+handoff composition has always used.
+ * Joins the parts of one agent step's system prompt in fixed order. Skills
+ * are loaded separately by the native harness, never included here.
  */
 export function composeSystemPrompt(...parts: Array<string | undefined>): string {
   return parts
@@ -3054,7 +3052,6 @@ export class RunManager {
     runId: string,
     content: PastedContent[],
     userAuthored: boolean,
-    preparedTeamSkillDir?: string | null,
   ): boolean {
     const state = this.active.get(runId);
     if (!state?.session?.open || state.cancelled) return false;
@@ -3081,18 +3078,6 @@ export class RunManager {
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
       .join('\n');
-    const slashSkill = userAuthored ? registrySlashSkill(text, state.skills ?? [])?.skill : undefined;
-    if (slashSkill?.source === 'team' && slashSkill.team && preparedTeamSkillDir === undefined) {
-      // Live messages have a synchronous acceptance API. Prepare companion files
-      // before delivery, then use the same path as opening and continuation turns.
-      void materializeSkillDir(state.cwd, slashSkill)
-        .catch(() => null)
-        .then((dir) => {
-          if (this.deliverMessage(runId, content, userAuthored, dir) || this.enqueueMessage(runId, content)) return;
-          this.deferMessage(runId, content);
-        });
-      return true;
-    }
     // Persist the attachments so the thread can render them (not just count them) — the same
     // on-disk store + `/images/` route the agent's own screenshots use. `pasted` prefix marks
     // these as user attachments (vs. agent tool screenshots) on disk (#357).
@@ -3118,9 +3103,7 @@ export class RunManager {
     // at all for a non-image attachment (#950), which is why `contentBlocksOf` drops file blocks
     // here rather than letting one reach a backend that has no idea what it is.
     const blocks = contentBlocksOf(content);
-    const expanded = userAuthored
-      ? expandRegistrySlashSkill(blocks, state.skills ?? [], preparedTeamSkillDir ?? undefined)
-      : blocks;
+    const expanded = userAuthored ? requestNativeSkill(blocks, state.skills ?? []) : blocks;
     const deliverable = persisted.length
       ? [...expanded, pastedAttachmentsNote(persisted, this.attachmentLibraryHint(persisted) ??
           (imageLibraryWrites.length ? attachmentLibraryDir(this.dataDir) : undefined))]
@@ -3402,6 +3385,7 @@ export class RunManager {
     // sessions; a continuation builds its OWN ActiveRun, and without this the resumed session
     // expanded against an empty registry and leaked `/om-...` verbatim to the backend, which
     // answered "Unknown skill" (#811). Best-effort — discovery must never break Continue.
+    await waitForTeamSkills(this.repoRoot);
     state.skills = await discoverSkills(this.repoRoot).catch(() => [] as Skill[]);
     // The dispatch session snapshot — the SECOND of the two `ActiveRun` construction
     // sites (spec 2026-09-10-dispatch; AGENTS.md § "every construction site"). A Continue
@@ -3660,6 +3644,7 @@ export class RunManager {
     }
     this.store.updateStep(runId, stepId, { profileId: continueProfile.profileId });
 
+    await exposeNativeSkills(this.repoRoot, state.cwd, state.skills ?? []).catch(() => {});
     const runner = createRunner(continueBackend);
     state.currentStepId = stepId;
     this.beginUsageInvocation(runId, state, stepId);
@@ -3667,8 +3652,7 @@ export class RunManager {
     // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
     // live path applies (#811). Delivery-only: the `user-message` event above already
     // persisted the user's original text, and the transcript must keep showing that.
-    const slashSkillDir = await materializeSlashTeamSkill(state.cwd, prompt, state.skills ?? []);
-    const expandedPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? [], slashSkillDir);
+    const expandedPrompt = requestNativeSkillText(prompt, state.skills ?? []);
     // Reports that arrived while this run had no session (spec Q7) open the continuation, ahead
     // of whatever prompted it — a commander resumed by its own children's reports has to be told
     // what they said. Delivery-only, like the `/skill` rewrite above.
@@ -3915,6 +3899,7 @@ export class RunManager {
     const seeded = this.store.getRun(runId);
     if (seeded) seedHandoffFile(this.dataDir, seeded);
 
+    await waitForTeamSkills(this.repoRoot);
     const skills = await discoverSkills(this.repoRoot);
     // Every ActiveRun construction site must carry the registry — `runContinuation` builds
     // its own, and the one that skipped this leaked raw `/skill` text to the backend (#811).
@@ -4133,29 +4118,9 @@ export class RunManager {
      *  real files, not just view the inline image blocks. */
     attachments: PersistedAttachment[] = [],
   ): Promise<string | null> {
-    let systemPrompt: string | undefined;
-    let selectedSkillDir: string | undefined;
     if (step.skill) {
       const skill = skills.find((s) => s.name === step.skill);
-      if (skill) {
-        // The body alone often does not identify the selected skill. Keep its
-        // name and catalog description in the normalized runner payload so a
-        // numeric task such as "432" still gives the model enough context to
-        // describe the work — and therefore derive a useful title (#432).
-        // Directory team skills (SKILL.md + references/) get materialized
-        // under Cezar's ignored run data; every backend receives its absolute path.
-        if (skill.source === 'team' && skill.team) {
-          selectedSkillDir = (await materializeSkillDir(state.cwd, skill).catch(() => null)) ?? undefined;
-          if (selectedSkillDir) {
-            emit({
-              type: 'note',
-              stepId: step.id,
-              message: `team skill "${skill.name}" materialized to ${selectedSkillDir}`,
-            });
-          }
-        }
-        systemPrompt = skillSystemPrompt(skill, selectedSkillDir);
-      } else {
+      if (!skill) {
         emit({
           type: 'note',
           stepId: step.id,
@@ -4165,18 +4130,13 @@ export class RunManager {
     }
 
     let userPrompt = applyTemplate(step.prompt ?? '{{task}}', input.task);
-    // A fresh run's OPENING prompt is delivered straight to `startSession`, never through
-    // `deliverMessage`, so — like the continuation seam above (#811) — it needs the same
-    // delivery-only `/skill` rewrite. Without it a task STARTED with `/om-...` as its first
-    // message leaks the raw slash to the backend, which answers "Unknown command" even though
-    // Cezar lists the skill (#278). `state.skills` was populated by `discoverSkills` earlier in
-    // `execute`. Expand before the chain/check/attachment prefixes so the leading slash still
-    // matches; a leading `/name` that is not a known skill passes through byte-for-byte.
+    // Cezar selects a skill by name; the backend loads its own installed copy,
+    // including references and any other skills it invokes.
     const slashSkill = registrySlashSkill(userPrompt, state.skills ?? []);
-    const slashSkillDir = slashSkill?.skill.name === step.skill
-      ? selectedSkillDir
-      : await materializeSlashTeamSkill(state.cwd, userPrompt, state.skills ?? []);
-    userPrompt = expandRegistrySlashSkillText(userPrompt, state.skills ?? [], slashSkillDir);
+    userPrompt = requestNativeSkillText(userPrompt, state.skills ?? []);
+    if (step.skill && skills.some((skill) => skill.name === step.skill) && !slashSkill) {
+      userPrompt = nativeSkillRequest(step.skill, userPrompt);
+    }
     if (chainNote) userPrompt = `${chainNote}\n\n---\n\n${userPrompt}`;
     // A commander recovered after a restart opens its first session holding whatever its children
     // reported while it was gone (spec Q7). Prepended and cleared here, after the slash expansion
@@ -4456,6 +4416,7 @@ export class RunManager {
     }
     this.store.updateStep(runId, step.id, { profileId: stepProfile.profileId });
 
+    await exposeNativeSkills(this.repoRoot, state.cwd, skills).catch(() => {});
     const runner = createRunner(stepBackend);
     let session: AgentSession;
     state.currentStepId = step.id;
@@ -4463,13 +4424,12 @@ export class RunManager {
     try {
       session = runner.startSession(
         {
-          // Skill body, then the dispatch prompt (spec 2026-09-10-dispatch — how a task dispatches,
+          // Dispatch prompt (spec 2026-09-10-dispatch — how a task dispatches,
           // reports and asks), then the automations prompt (spec 2026-09-13-automations-from-prompt
           // — how a task creates a GitHub automation), then the run's extra
           // prompt (POST override or config default, which may amend any of them), then the
           // handoff/todos contract — every agent step.
           systemPrompt: composeSystemPrompt(
-            systemPrompt,
             dispatchPromptPart(state.dispatchPrompt, extraSystemPrompt),
             state.automationsPrompt,
             extraSystemPrompt,
@@ -5260,50 +5220,10 @@ export function makeRunTitle(task: string, workflow: WorkflowDef): string {
   return chars.length > 80 ? `${chars.slice(0, 79).join('').trimEnd()}…` : chars.join('');
 }
 
-/**
- * Skill identity is context, while the Markdown body remains instructions.
- *
- * For an on-disk skill we also hand the agent the ABSOLUTE directory of the
- * installed copy. A run executes in an isolated worktree that has no local
- * installed skill directories (gitignored, absent in a fresh checkout), so without this
- * the agent cannot read the skill's companion files (`references/*.md`) — or,
- * worse, reads a stale copy materialized from the team-repo cache. The path
- * resolves against the MAIN project root (`discoverSkills(repoRoot)`), i.e. the
- * current installed copy, so a worktree agent and the main
- * checkout read the exact same, up-to-date files. A materialized team skill
- * passes its worktree directory explicitly (see the call site).
- */
-export function skillSystemPrompt(
-  skill: Pick<Skill, 'name' | 'description' | 'body'> & Partial<Pick<Skill, 'path' | 'source'>>,
-  installedDir?: string,
-): string {
-  const lines = [
-    `Selected skill: /${skill.name}`,
-    ...(skill.description ? [`Description: ${skill.description}`] : []),
-  ];
-  const dir =
-    installedDir ??
-    (skill.source && skill.source !== 'team' && skill.path ? dirname(skill.path) : undefined);
-  if (dir) {
-    lines.push(
-      '',
-      `Skill files are installed on disk at: ${dir}`,
-      `Read any file this skill references (for example references/*.md) from that absolute directory. ` +
-        `It is the current installed copy; use it instead of searching other skill locations.`,
-    );
-  }
-  lines.push('', 'Skill instructions:', skill.body.trim());
-  return lines.join('\n');
-}
-
-async function materializeSlashTeamSkill(
-  cwd: string,
-  text: string,
-  skills: readonly Skill[],
-): Promise<string | undefined> {
-  const skill = registrySlashSkill(text, skills)?.skill;
-  if (skill?.source !== 'team' || !skill.team) return undefined;
-  return (await materializeSkillDir(cwd, skill).catch(() => null)) ?? undefined;
+/** Select a skill by name; the harness reads its installed files itself. */
+export function nativeSkillRequest(name: string, request: string): string {
+  const hint = `Use your installed "${name}" skill for this request.`;
+  return request ? `${hint}\n\n${request}` : hint;
 }
 
 function registrySlashSkill(
@@ -5316,50 +5236,43 @@ function registrySlashSkill(
 }
 
 /**
- * Expand a registry-backed slash skill in one prompt string before it reaches a
- * backend. Claude otherwise intercepts an unknown leading slash command, and
- * Codex/OpenCode have no native slash-skill lookup at all (#676).
+ * Translate Cezar's skill picker slash into a request to the backend's native
+ * skill loader. Cezar never copies SKILL.md content into the runner prompt.
  *
  * Only a match at character zero counts, and unknown commands pass through
  * byte-for-byte — a backend's OWN slash commands must keep working. The caller
  * persists the original user text before applying this delivery-only rewrite.
  *
  * Both delivery seams route through here: live-session messages via
- * `expandRegistrySlashSkill`, and a continuation's opening prompt, which becomes
+ * `requestNativeSkill`, and a continuation's opening prompt, which becomes
  * the session's `userPrompt` and never passes through `deliverMessage` at all
  * (#811).
  */
-export function expandRegistrySlashSkillText(
+export function requestNativeSkillText(
   text: string,
   skills: readonly Skill[],
-  installedDir?: string,
 ): string {
   const match = registrySlashSkill(text, skills);
   if (!match) return text;
 
   const request = text.slice(match.command[0].length).trim();
-  const prompt = skillSystemPrompt(
-    match.skill,
-    match.skill.source === 'team' ? installedDir : undefined,
-  );
-  return request ? `${prompt}\n\nUser request:\n${request}` : prompt;
+  return nativeSkillRequest(match.skill.name, request);
 }
 
 /**
- * `expandRegistrySlashSkillText` over a live chat message: only the first text
+ * `requestNativeSkillText` over a live chat message: only the first text
  * block is eligible, and an unchanged block returns the caller's array
  * identity untouched.
  */
-export function expandRegistrySlashSkill(
+export function requestNativeSkill(
   content: ContentBlock[],
   skills: readonly Skill[],
-  installedDir?: string,
 ): ContentBlock[] {
   const textIndex = content.findIndex((block) => block.type === 'text');
   if (textIndex < 0) return content;
   const block = content[textIndex];
   if (!block || block.type !== 'text') return content;
-  const text = expandRegistrySlashSkillText(block.text, skills, installedDir);
+  const text = requestNativeSkillText(block.text, skills);
   if (text === block.text) return content;
 
   const expanded = [...content];

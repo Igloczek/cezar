@@ -14,7 +14,6 @@ import {
   composeSystemPrompt,
   makeRunTitle,
   resolveExtraSystemPrompt,
-  skillSystemPrompt,
 } from './run.ts';
 
 const run = promisify(execFile);
@@ -35,14 +34,14 @@ describe('resolveExtraSystemPrompt', () => {
   });
 });
 
-/** Fixed part order: skill body → extra prompt → handoff contract. */
+/** Fixed part order for Cezar's own prompts; skills load natively. */
 describe('composeSystemPrompt', () => {
   const H = 'HANDOFF CONTRACT';
   it.each([
     ['contract only', [undefined, undefined, H], H],
-    ['skill + contract (the pre-2.3 composition, unchanged)', ['SKILL BODY', undefined, H], `SKILL BODY\n\n---\n\n${H}`],
+    ['two parts', ['PART A', undefined, H], `PART A\n\n---\n\n${H}`],
     ['extra + contract', [undefined, 'EXTRA', H], `EXTRA\n\n---\n\n${H}`],
-    ['skill + extra + contract', ['SKILL BODY', 'EXTRA', H], `SKILL BODY\n\n---\n\nEXTRA\n\n---\n\n${H}`],
+    ['three parts', ['PART A', 'EXTRA', H], `PART A\n\n---\n\nEXTRA\n\n---\n\n${H}`],
     ['blank parts drop out', ['', '   ', H], H],
   ] as const)('%s', (_name, parts, expected) => {
     expect(composeSystemPrompt(...parts)).toBe(expected);
@@ -437,7 +436,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     expect(prompt).not.toContain(CONFIG_PROMPT);
   }, 30_000);
 
-  it('sends skill identity, description, instructions, and numeric task context to the runner', async () => {
+  it('passes the skill name to the native loader without injecting its body', async () => {
     const id = await runToEnd({ task: '432' }, skillWorkflow);
     const record = store.getRun(id);
 
@@ -455,26 +454,16 @@ describe('systemPrompt end-to-end (dry run)', () => {
     expect(named?.titleSummary).toBe('432: implementing cr fixes');
     expect(named?.titleOrigin).toBe('auto');
 
-    const skillPrompt = skillSystemPrompt({
-      name: 'om-auto-review-pr',
-      description: SKILL_DESCRIPTION,
-      body: SKILL_BODY,
-      // The runner passes the full discovered skill, so the prompt carries the
-      // absolute path of the installed copy (read from the MAIN repo even in a
-      // worktree). Mirror that here so the expected prompt matches.
-      path: join(repoRoot, '.future/skills/om-auto-review-pr/SKILL.md'),
-      source: 'project',
-    });
-    expect(capturedSystemPrompt()).toBe(
-      composeSystemPrompt(skillPrompt, CONFIG_PROMPT, HANDOFF_INSTRUCTIONS),
-    );
+    expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, HANDOFF_INSTRUCTIONS));
+    expect(capturedSystemPrompt()).not.toContain(SKILL_BODY);
 
     // The mock writes the actual first user message it received into the run
     // worktree, proving the argument is still the runner's user prompt rather
     // than being swallowed by title construction.
     const worktreePath = record?.worktreePath;
     if (!worktreePath) throw new Error('run did not create its worktree');
-    expect(readFileSync(join(worktreePath, 'notes.md'), 'utf8')).toContain(': 432\n');
+    expect(readFileSync(join(worktreePath, 'notes.md'), 'utf8')).toContain('Use your installed "om-auto-review-pr" skill');
+    expect(readFileSync(join(worktreePath, 'notes.md'), 'utf8')).toContain('432');
   }, 30_000);
 
   // The positive control for the opt-out test below: without this, mistyping the `!== false`

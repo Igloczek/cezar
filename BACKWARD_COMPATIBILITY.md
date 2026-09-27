@@ -125,7 +125,7 @@ Breaking: renaming a key, tightening a refinement so previously valid files fail
 
 ## 5. Skills Markdown format (`packages/cezar/src/skills.ts`)
 
-A skill is a `skills/<name>/SKILL.md` file with optional YAML frontmatter (`name`, `description`); the body becomes the agent's extra system prompt. Protected: frontmatter keys; project → global → team discovery precedence; name-collision resolution ("the user's repo is the source of truth"); the `config.json` `skillsRepos` source shape (`{repo, ref}` — GitHub shorthand, git URL, or local path). Flat `.md` files in Cezar-only directories are no longer skill sources.
+A skill is a `skills/<name>/SKILL.md` file with optional YAML frontmatter (`name`, `description`). Cezar exposes its complete directory to the agent's native loader and passes only the selected name in the request. Protected: frontmatter keys; project → global → team discovery precedence; name-collision resolution ("the user's repo is the source of truth"); the `config.json` `skillsRepos` source shape (`{repo, ref}` — GitHub shorthand, git URL, or local path). Flat `.md` files in Cezar-only directories are no longer skill sources.
 
 Breaking: requiring frontmatter, dropping a discovered `skills` directory, or inverting precedence so a team skill shadows a local one. Add new discovery locations without replacing working ones; a precedence change needs a README callout and a minor bump.
 

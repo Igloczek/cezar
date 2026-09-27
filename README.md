@@ -143,7 +143,7 @@ steps:
 
 The built-in `quick-task` workflow runs with no setup.
 
-Cezar reads `skills/<name>/SKILL.md` from coding-agent directories in the project and your home. Move skills from Cezar-only `.ai/skills` or `.ai/cezar/skills` into one of those directories; flat `.md` files need a `<name>/SKILL.md` layout.
+Cezar reads `skills/<name>/SKILL.md` from coding-agent directories in the project and your home. For each task, it exposes the complete skill directories in the worktree under `.agents/skills`, `.claude/skills`, `.pi/skills`, and any other `skills` roots already present in the project. The agent loads the skill and its referenced files itself. Move skills from Cezar-only `.ai/skills` or `.ai/cezar/skills` into a coding-agent directory; flat `.md` files need a `<name>/SKILL.md` layout.
 
 ## Documentation
 

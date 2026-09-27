@@ -2508,11 +2508,11 @@ describe('native Codex requestUserInput parks and resumes the run (#565)', () =>
 });
 
 /**
- * #811 — registry `/skill` expansion on the CONTINUATION path.
+ * #811 — native skill selection on the CONTINUATION path.
  *
- * `expandRegistrySlashSkill` (#676) reads `state.skills`, which only `execute` ever
+ * Skill selection reads `state.skills`, which only `execute` ever
  * populated. `runContinuation` builds its OWN `ActiveRun`, so a Reply into a finished
- * run — and every restart recovery, which routes through `continueRun` — expanded
+ * run — and every restart recovery, which routes through `continueRun` — selected
  * against an empty registry and handed the raw `/om-...` to the backend, which answered
  * "Unknown skill". Two seams have to hold: the continuation's opening prompt (the
  * session's `userPrompt`, which never passes through `deliverMessage`) and the
@@ -2521,7 +2521,7 @@ describe('native Codex requestUserInput parks and resumes the run (#565)', () =>
  * The mock CLI echoes the prompt it received (`Okay — looking into: …`), so the
  * transcript is a faithful witness of what actually reached the backend.
  */
-describe('registry /skill expansion survives a continuation (#811)', () => {
+describe('native skill selection survives a continuation (#811)', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
@@ -2597,9 +2597,9 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
     const echoed = eventsOf(id).find(
       (e) => e.stepId === 'continue-1' && e.type === 'text' && e.text?.includes('looking into'),
     );
-    // The backend saw the expanded skill prompt, NOT a bare slash command it would
-    // reject as an unknown skill.
-    expect(echoed?.text).toContain('Selected skill: /demo-review');
+    // The backend receives the name and loads its own installed skill.
+    expect(echoed?.text).toContain('Use your installed "demo-review" skill');
+    expect(echoed?.text).not.toContain('Run the demo review playbook.');
     expect(echoed?.text).not.toContain('/demo-review look at the diff');
 
     // Delivery-only: the transcript still shows what the user actually typed.
@@ -2614,10 +2614,10 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
 
     expect(manager.sendMessage(id, [{ type: 'text', text: '/demo-review now review it' }])).toBe(true);
     await waitFor(() =>
-      eventsOf(id).filter((e) => e.type === 'text' && e.text?.includes('Selected skill: /demo-review')).length > 0,
+      eventsOf(id).filter((e) => e.type === 'text' && e.text?.includes('Use your installed "demo-review" skill')).length > 0,
     );
     expect(
-      eventsOf(id).some((e) => e.type === 'text' && e.text?.includes('Selected skill: /demo-review')),
+      eventsOf(id).some((e) => e.type === 'text' && e.text?.includes('Use your installed "demo-review" skill')),
     ).toBe(true);
   }, 40_000);
 
@@ -2635,7 +2635,7 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
 });
 
 /**
- * #278 — registry `/skill` expansion on a FRESH run's OPENING prompt.
+ * #278 — native skill selection on a FRESH run's OPENING prompt.
  *
  * A task STARTED with `/om-...` as its first message is delivered straight to
  * `startSession` inside `execute`, never through `deliverMessage`, and #811 only
@@ -2645,7 +2645,7 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
  * The mock CLI echoes the prompt it received (`Okay — looking into: …`), so the
  * transcript is a faithful witness of what actually reached the backend.
  */
-describe("registry /skill expansion on a fresh run's opening prompt (#278)", () => {
+describe("native skill selection on a fresh run's opening prompt (#278)", () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
@@ -2720,9 +2720,9 @@ describe("registry /skill expansion on a fresh run's opening prompt (#278)", () 
     const echoed = eventsOf(record.id).find(
       (e) => e.stepId === 'task' && e.type === 'text' && e.text?.includes('looking into'),
     );
-    // The backend saw the expanded skill prompt, NOT the bare slash command it would
-    // reject as an unknown command.
-    expect(echoed?.text).toContain('Selected skill: /demo-review');
+    // The backend receives the name and loads its own installed skill.
+    expect(echoed?.text).toContain('Use your installed "demo-review" skill');
+    expect(echoed?.text).not.toContain('Run the demo review playbook.');
     expect(echoed?.text).not.toContain('/demo-review look at the diff');
   }, 40_000);
 

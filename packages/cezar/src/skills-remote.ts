@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { loadConfig, type SkillsRepoSource } from './config.ts';
@@ -75,8 +76,8 @@ const ALLOWED_URL_SCHEMES = new Set(['https', 'http', 'ssh', 'git', 'file']);
 
 /**
  * The git remote for a configured source, or null when the value is unsafe to
- * hand to `git` (#428). Team-skill repos are code-trusted — their skill bodies
- * become agent system prompts — but the *string* is attacker-influenceable, so
+ * hand to `git` (#428). Team-skill repos are code-trusted because agents load
+ * their instructions — but the *string* is attacker-influenceable, so
  * it must never be able to select a transport helper or pose as a git option.
  * We accept exactly:
  *  - `owner/name`         GitHub shorthand → canonical https
@@ -310,11 +311,10 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
 // ---- materialization (directory skills) ---------------------------------------
 
 /**
- * Copy a directory skill (SKILL.md + references/…) out of the bare clone into
- * `<repoRoot>/.ai/cezar/tmp/skills/<name>/`. Cezar passes that absolute path
- * to any backend, so no agent-specific installation or symlinks are needed.
- * Keep it out of the user's git via `.git/info/exclude`. Returns the directory, or null
- * when there is nothing to materialize (no clone…).
+ * Check out the whole cached team repo once per commit. A skill can refer to
+ * siblings and carry binary assets or symlinks, so extracting SKILL.md files
+ * individually would silently break it. Native harnesses see this checkout
+ * through project skill links. The temporary checkout has no embedded .git.
  */
 export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<string | null> {
   if (
@@ -329,32 +329,36 @@ export async function materializeSkillDir(repoRoot: string, skill: Skill): Promi
   }
   const bareDir = bareDirFor(skill.team.repo);
   if (!existsSync(join(bareDir, 'HEAD'))) return null;
-  const ref = await resolveRef(bareDir, skill.team.ref);
+  const ref = skill.team.commit && isPinnedSha(skill.team.commit)
+    ? skill.team.commit
+    : await resolveRef(bareDir, skill.team.ref);
   if (ref === null) return null;
   const srcDir = skill.team.path.slice(0, -'/SKILL.md'.length);
-  const ls = await git(['ls-tree', '-r', '--name-only', ref, '--', srcDir], LIST_TIMEOUT_MS, bareDir);
-  if (!ls.ok) return null;
-
-  const destDir = join(repoRoot, '.ai', 'cezar', 'tmp', 'skills', skill.name);
-  let wrote = 0;
-  for (const file of ls.stdout.split('\n').filter(Boolean)) {
-    const rel = file.slice(srcDir.length + 1);
-    // git paths are repo-relative and normalized, but never trust them blindly.
-    if (!rel || rel.split('/').includes('..')) continue;
-    const show = await git(['show', `${ref}:${file}`], LIST_TIMEOUT_MS, bareDir);
-    if (!show.ok) continue;
-    const target = join(destDir, rel);
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, show.stdout, 'utf8');
-    wrote++;
+  if (srcDir.startsWith('/') || srcDir.split('/').includes('..')) return null;
+  const key = createHash('sha256').update(`${skill.team.repo}@${ref}`).digest('hex').slice(0, 16);
+  const checkout = join(repoRoot, '.ai', 'cezar', 'tmp', 'skills-repos', key);
+  const skillDir = join(checkout, srcDir);
+  if (!existsSync(join(skillDir, 'SKILL.md'))) {
+    const stage = `${checkout}-${randomUUID()}`;
+    await mkdir(dirname(checkout), { recursive: true });
+    const cloned = await git(['clone', '--shared', '--no-checkout', bareDir, stage], CLONE_TIMEOUT_MS);
+    if (!cloned.ok) return null;
+    try {
+      const checkedOut = await git(['checkout', '--detach', ref], CLONE_TIMEOUT_MS, stage);
+      if (!checkedOut.ok) return null;
+      await rm(join(stage, '.git'), { recursive: true, force: true });
+      await rename(stage, checkout).catch(() => {}); // another run may have won the race
+      await excludeFromGit(repoRoot, '.ai/cezar/tmp/');
+    } finally {
+      await rm(stage, { recursive: true, force: true });
+    }
   }
-  if (wrote === 0) return null;
-  await excludeFromGit(repoRoot, '.ai/cezar/tmp/');
-  return destDir;
+  if (!existsSync(join(skillDir, 'SKILL.md'))) return null;
+  return skillDir;
 }
 
 /** Append a pattern to git's `info/exclude` (idempotent, non-fatal). */
-async function excludeFromGit(repoRoot: string, pattern: string): Promise<void> {
+export async function excludeFromGit(repoRoot: string, patterns: string | string[]): Promise<void> {
   try {
     // Resolve the real exclude file: in a linked worktree (spec 006) `.git`
     // is a file and `info/exclude` lives in the shared common dir — which
@@ -372,9 +376,11 @@ async function excludeFromGit(repoRoot: string, pattern: string): Promise<void> 
     } catch {
       // no exclude file yet
     }
-    if (prev.split('\n').includes(pattern)) return;
+    const existing = new Set(prev.split('\n'));
+    const missing = (Array.isArray(patterns) ? patterns : [patterns]).filter((pattern) => !existing.has(pattern));
+    if (missing.length === 0) return;
     await mkdir(dirname(excludePath), { recursive: true });
-    await writeFile(excludePath, prev + (prev && !prev.endsWith('\n') ? '\n' : '') + pattern + '\n', 'utf8');
+    await appendFile(excludePath, `${prev && !prev.endsWith('\n') ? '\n' : ''}${missing.join('\n')}\n`, 'utf8');
   } catch {
     // non-fatal — `.git` might be a linked file (worktree) or absent entirely
   }

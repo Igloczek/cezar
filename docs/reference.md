@@ -28,8 +28,8 @@ Three words, no jargon — **task**, **skill**, **chain**:
 - 📖 **Skills** are `SKILL.md` playbooks. Cezar finds skills already installed for
   coding agents in the project or your home, or pulls them from a shared **team skills repo**
   (a bare git clone cached globally in `~/.cache/cez/`).
-  A workflow step references one by `skill: <name>` and its body becomes the
-  agent's extra system prompt — so you shape *how* the agent reasons without touching code.
+  A workflow step references one by `skill: <name>`; Cezar exposes the complete
+  skill directory and the agent loads it with its own skill support.
 - 🔗 **Chains (workflows)** stitch steps into a pipeline: agent steps plus shell
   checks, with bounded `onFail` retry loops. Write the YAML yourself, build one by
   drag-ordering skills in the **Workflows** tab, or press **Plan first** and let the
@@ -473,7 +473,7 @@ never blocks startup):
 ```jsonc
 {
   "skillsRepos": [{ "repo": "open-mercato/skills", "ref": "main" }], // team skills; [] disables
-  // Team-skill repos are code-trusted: a skill body becomes an agent system prompt.
+  // Team-skill repos are code-trusted: native agents read their installed files.
   // Only owner/name, https/ssh URLs, or local paths (`/abs`, `./rel`, `~/dir`,
   // `C:\dir`) are accepted — no ext::/fd:: transport helpers. Write a relative
   // path as `./name`, not a bare `name`. Pin `ref` to a full commit SHA to freeze

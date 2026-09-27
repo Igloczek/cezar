@@ -56,11 +56,14 @@ it('passes a team skill and its references through Cezar-owned files, without an
     const source = join(root, 'source');
     const checkout = join(root, 'checkout');
     await mkdir(join(source, 'review', 'references'), { recursive: true });
+    await mkdir(join(source, 'other'), { recursive: true });
     await mkdir(join(source, 'commands'), { recursive: true });
     await mkdir(join(source, '.ai/skills'), { recursive: true });
     await mkdir(checkout);
     await writeFile(join(source, 'review', 'SKILL.md'), '# Review');
+    await writeFile(join(source, 'other', 'SKILL.md'), '# Other');
     await writeFile(join(source, 'review', 'references', 'rules.md'), '# Rules');
+    await writeFile(join(source, 'review', 'references', 'asset.bin'), Buffer.from([0, 255, 1]));
     await writeFile(join(source, 'commands', 'legacy.md'), '# Old command');
     await writeFile(join(source, '.ai/skills', 'legacy.md'), '# Old Cezar skill');
     git('init', '-q', '-b', 'main', source);
@@ -71,14 +74,16 @@ it('passes a team skill and its references through Cezar-owned files, without an
     expect(bare.startsWith(process.env.HOME)).toBe(true);
     await mkdir(dirname(bare), { recursive: true });
     git('clone', '-q', '--bare', source, bare);
-    expect((await listRemoteSkills({ repo: source, ref: 'main' })).map((skill) => skill.name)).toEqual(['review']);
+    expect((await listRemoteSkills({ repo: source, ref: 'main' })).map((skill) => skill.name)).toEqual(['other', 'review']);
 
     const dir = await materializeSkillDir(checkout, {
       name: 'review', body: '# Review', path: `${source}@main:review/SKILL.md`, source: 'team',
       team: { repo: source, ref: 'main', path: 'review/SKILL.md' },
     });
-    expect(dir).toBe(join(checkout, '.ai/cezar/tmp/skills/review'));
+    expect(dir).toContain(join(checkout, '.ai/cezar/tmp/skills-repos/'));
     expect(await readFile(join(dir!, 'references/rules.md'), 'utf8')).toBe('# Rules');
+    expect(await readFile(join(dir!, '../other/SKILL.md'), 'utf8')).toBe('# Other');
+    expect(await readFile(join(dir!, 'references/asset.bin'))).toEqual(Buffer.from([0, 255, 1]));
     expect(git('-C', checkout, 'status', '--short', '--untracked-files=all')).toBe('');
   } finally {
     if (previousHome === undefined) delete process.env.HOME;

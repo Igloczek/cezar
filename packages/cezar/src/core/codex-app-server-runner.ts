@@ -365,7 +365,7 @@ class CodexSession implements AgentSession {
       this.emitUi((state) => codexSessionStarted(threadId, state));
     }
 
-    // Seed the first turn. The system prompt (skill body + handoff contract)
+    // Seed the first turn. Cezar's system prompt (handoff contract, etc.)
     // has no dedicated app-server field, so it rides along as a leading block
     // of the opening message.
     const first = prependSystemPrompt(this.spec.systemPrompt, this.spec.userPrompt);
