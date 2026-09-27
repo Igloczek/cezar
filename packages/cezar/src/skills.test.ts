@@ -191,6 +191,40 @@ describe('discoverSkills local entrypoints', () => {
       else process.env.FUTURE_AGENT_CONFIG_DIR = previous;
     }
   });
+
+  it('finds direct and nested project and global skill roots without agent names', async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), 'cezar-skills-'));
+    const home = await mkdtemp(join(tmpdir(), 'cezar-home-'));
+    tempDirs.push(repoRoot, home);
+    const locations = [
+      [join(repoRoot, 'skills/root-skill'), 'root-skill', 'agents'],
+      [join(repoRoot, 'agent/subagents/future/skills/sub-skill'), 'sub-skill', 'agents'],
+      [join(home, '.odd/assistant/skills/home-skill'), 'home-skill', 'global'],
+      [join(home, '.config/future/harness/skills/config-skill'), 'config-skill', 'global'],
+      [join(home, 'custom-config/future/skills/xdg-skill'), 'xdg-skill', 'global'],
+    ] as const;
+    for (const [dir] of locations) {
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, 'SKILL.md'), '# Skill');
+    }
+    const previous = process.env.HOME;
+    const previousXdg = process.env.XDG_CONFIG_HOME;
+    process.env.HOME = home;
+    process.env.XDG_CONFIG_HOME = join(home, 'custom-config');
+    try {
+      const skills = await discoverSkills(repoRoot);
+      for (const [dir, name, source] of locations) {
+        expect(skills.find((skill) => skill.name === name)).toMatchObject({
+          path: join(dir, 'SKILL.md'), source,
+        });
+      }
+    } finally {
+      if (previous === undefined) delete process.env.HOME;
+      else process.env.HOME = previous;
+      if (previousXdg === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = previousXdg;
+    }
+  });
 });
 
 /**

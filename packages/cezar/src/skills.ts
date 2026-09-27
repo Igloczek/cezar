@@ -43,29 +43,64 @@ export const SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
   { dir: '.ai/skills', source: 'ai' },
 ];
 
-/** Find skill roots directly below directories without enumerating harness names. */
-async function childSkillDirs(
+/** Find existing `skills` directories without knowing which agent owns them. */
+async function findSkillDirs(
   root: string,
-  excluded: ReadonlySet<string> = new Set(),
+  maxDepth: number,
+  excludedAtRoot: ReadonlySet<string> = new Set(),
 ): Promise<string[]> {
-  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
-  return entries
-    .filter((entry) => !excluded.has(entry.name) && (entry.isDirectory() || entry.isSymbolicLink()))
-    .map((entry) => join(root, entry.name, 'skills'))
-    .sort();
+  const found: string[] = [];
+  const realRoot = await realpath(root).catch(() => null);
+  if (!realRoot) return found;
+  const visited = new Set([realRoot]);
+  const queue = [{ dir: root, real: realRoot, depth: 0 }];
+  while (queue.length) {
+    const batch = queue.splice(0, 32);
+    const children = await Promise.all(batch.map(async ({ dir, real, depth }) => {
+      const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+      return Promise.all(entries.map(async (entry) => {
+        if (
+          (depth === 0 && excludedAtRoot.has(entry.name)) ||
+          entry.name === '.git' || entry.name === 'node_modules' ||
+          entry.name === '.cache' || entry.name === 'worktrees'
+        ) return null;
+        const path = join(dir, entry.name);
+        const isDir = entry.isDirectory() ||
+          (entry.isSymbolicLink() && await stat(path).then((s) => s.isDirectory()).catch(() => false));
+        if (!isDir) return null;
+        if (entry.name === 'skills') {
+          found.push(path);
+          return null;
+        }
+        if (depth + 1 >= maxDepth) return null;
+        const target = entry.isSymbolicLink() ? await realpath(path).catch(() => null) : join(real, entry.name);
+        return target ? { dir: path, real: target, depth: depth + 1 } : null;
+      }));
+    }));
+    for (const child of children.flat()) {
+      if (!child || visited.has(child.real)) continue;
+      visited.add(child.real);
+      queue.push(child);
+    }
+  }
+  return found.sort();
 }
 
 async function globalSkillDirs(): Promise<string[]> {
   const home = homedir();
   const configHome = process.env.XDG_CONFIG_HOME?.trim() || join(home, '.config');
-  const roots = [
-    ...await childSkillDirs(home),
-    ...await childSkillDirs(configHome),
+  const homeEntries = await readdir(home, { withFileTypes: true }).catch(() => []);
+  const roots = [...new Set([
+    ...homeEntries.filter((entry) => entry.name.startsWith('.') && entry.name !== '.cache' &&
+      (entry.isDirectory() || entry.isSymbolicLink()))
+      .map((entry) => join(home, entry.name)),
+    configHome,
     ...Object.entries(process.env)
-      .filter(([key, value]) => /(?:_HOME|_CONFIG_DIR)$/.test(key) && value && isAbsolute(value))
-      .map(([, value]) => join(value!, 'skills')),
-  ];
-  return [...new Set(roots)];
+      .filter(([key, value]) => /(?:_HOME|_CONFIG_DIR)$|^(?:APPDATA|LOCALAPPDATA)$/.test(key) && value && isAbsolute(value))
+      .map(([, value]) => value!),
+  ])];
+  const nested = await Promise.all(roots.map((root) => findSkillDirs(root, 5)));
+  return [...new Set([...await findSkillDirs(home, 1), ...nested.flat()])];
 }
 
 /**
@@ -91,8 +126,9 @@ async function globalSkillDirs(): Promise<string[]> {
  * picker, planner, runner.
  */
 export async function discoverSkills(repoRoot: string): Promise<Skill[]> {
-  const projectSkillDirs = await childSkillDirs(
+  const projectSkillDirs = await findSkillDirs(
     repoRoot,
+    4,
     new Set(['.ai', '.git', 'node_modules']),
   );
   const globalDirs = await globalSkillDirs();
