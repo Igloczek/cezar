@@ -41,21 +41,24 @@ as the model: a canonical skill directory plus symlinks into agent locations,
 with copies where symlinks are unavailable. Its `skills use` command also
 generates prompts; that is a separate feature and **not** the model here.
 
-Cezar may discover, fetch, update, display, and install skills. It must not
-resolve a skill at message delivery or alter `userPrompt`, `systemPrompt`, or
-message blocks because of a skill name. The agent's native loader owns skill
-selection, Markdown parsing, references, and calls to other skills.
+Cezar may discover, fetch, update, display, and install skills. Installation
+runs when the catalog changes and when a task worktree is created or recovered,
+not when a message is delivered or an agent session starts. Cezar must not
+alter `userPrompt`, `systemPrompt`, or message blocks because of a skill name.
+The agent's native loader owns skill selection, Markdown parsing, references,
+and calls to other skills.
 
 1. Keep current discovery locations, precedence, API source values, and
    `importedSkills` selection. A missing team repo still degrades quietly. Do
    not require a new setting or rewrite a user's installation.
-2. Prepare the **complete effective catalog** before a harness starts in a
-   project or task worktree. Preserve references, scripts, assets, and file
-   modes. Link each skill into `.agents/skills/<name>/` for Codex, OpenCode,
-   and Pi; link it into `.claude/skills/<name>/` for Claude Code. Copy where
+2. Install the **complete effective catalog** in the project and each task
+   worktree during filesystem setup and reconcile it after catalog changes.
+   Preserve references, scripts, assets, and file modes. Link each skill into
+   `.agents/skills/<name>/` for Codex, OpenCode, and Pi; link it into
+   `.claude/skills/<name>/` for Claude Code. Copy where
    links are unsupported. Preserve the catalog winner on a name collision;
-   never overwrite a user file. The filesystem step also runs after a restart
-   when a worktree must be reconstructed.
+   never overwrite a user file. Recovery repairs missing links without
+   modifying an agent prompt.
 3. For a legacy flat `.md` source, create a temporary `<name>/SKILL.md`
    adapter with its existing body, name, and description. For a team skill,
    extract the complete directory from the cached revision. Generated files
@@ -68,7 +71,8 @@ selection, Markdown parsing, references, and calls to other skills.
    nor adds a “use this skill” hint.
 
 This eliminates three prompt-delivery paths and the selected-skill special
-case. Only the installation boundary knows where skill files belong. A future
+case. Session delivery in `run.ts` no longer needs skill-specific branches.
+Only the installation boundary knows where skill files belong. A future
 harness can use the same canonical files through its documented loader path.
 
 ## Authoring nested skills
@@ -115,9 +119,8 @@ compatibility phase, **not** the target architecture.
   translated slash command, or name-only hint; prove that the test fails
   against the old behavior.
 - Verify a clean task Git status, preserved source installations, an offline
-  team repo, and an in-place run. A failed preparation must produce a visible
-  note when a requested skill cannot be loaded, rather than silently telling
-  the agent to use a missing skill.
+  team repo, and an in-place run. Installation failures are reported at the
+  catalog/worktree boundary; message delivery never compensates with a prompt.
 
 The shared directory covers Cezar's four current backends. No orchestrator
 can promise discovery by an arbitrary future harness with an unknown private
