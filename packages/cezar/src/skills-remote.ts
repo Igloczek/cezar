@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { loadConfig, type SkillsRepoSource } from './config.ts';
@@ -334,41 +334,60 @@ export async function listRemoteSkills(src: SkillsRepoSource): Promise<Skill[]> 
 // ---- materialization (directory skills) ---------------------------------------
 
 /**
- * Copy a directory skill (SKILL.md + references/…) out of the bare clone into
- * `<repoRoot>/.claude/skills/<name>/` so claude sees the references on disk,
- * and keep it out of the user's git via `.git/info/exclude`. Returns false
- * when there is nothing to materialize (not a directory skill, no clone…).
+ * Copy a directory skill (SKILL.md, references, scripts and binary assets) out
+ * of the pinned bare-clone revision into Cezar's ignored canonical directory.
+ * `installSkills` then links that directory into every native harness location.
+ * Returns false when there is nothing to materialize.
  */
 export async function materializeSkillDir(repoRoot: string, skill: Skill): Promise<boolean> {
   if (!skill.team?.dir || !skill.team.path.endsWith('SKILL.md')) return false;
   const bareDir = bareDirFor(skill.team.repo);
   if (!existsSync(join(bareDir, 'HEAD'))) return false;
-  const ref = await resolveRef(bareDir, skill.team.ref);
+  const ref = skill.team.commit ?? await resolveRef(bareDir, skill.team.ref);
   if (ref === null) return false;
   const srcDir = skill.team.path.slice(0, -'/SKILL.md'.length);
-  const ls = await git(['ls-tree', '-r', '--name-only', ref, '--', srcDir], LIST_TIMEOUT_MS, bareDir);
+  const ls = await git(['ls-tree', '-r', ref, '--', srcDir], LIST_TIMEOUT_MS, bareDir);
   if (!ls.ok) return false;
 
-  const destDir = join(repoRoot, '.claude', 'skills', skill.name);
+  const destDir = join(repoRoot, '.ai', 'cezar', 'tmp', 'native-skills', skill.name);
   let wrote = 0;
-  for (const file of ls.stdout.split('\n').filter(Boolean)) {
+  for (const line of ls.stdout.split('\n').filter(Boolean)) {
+    const match = /^(\d+) blob [0-9a-f]+\t(.+)$/.exec(line);
+    if (!match) continue;
+    const [, mode, file] = match;
+    if (!mode || !file) continue;
     const rel = file.slice(srcDir.length + 1);
     // git paths are repo-relative and normalized, but never trust them blindly.
     if (!rel || rel.split('/').includes('..')) continue;
-    const show = await git(['show', `${ref}:${file}`], LIST_TIMEOUT_MS, bareDir);
-    if (!show.ok) continue;
+    const show = await gitBinary(['show', `${ref}:${file}`], LIST_TIMEOUT_MS, bareDir);
+    if (show === null) continue;
     const target = join(destDir, rel);
     await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, show.stdout, 'utf8');
+    if (mode === '120000') {
+      const link = show.toString('utf8');
+      if (link.startsWith('/') || link.split('/').includes('..')) continue;
+      await symlink(link, target);
+    } else {
+      await writeFile(target, show);
+      if (mode === '100755') await chmod(target, 0o755);
+    }
     wrote++;
   }
   if (wrote === 0) return false;
-  await excludeFromGit(repoRoot, `.claude/skills/${skill.name}/`);
   return true;
 }
 
+function gitBinary(args: string[], timeoutMs: number, cwd: string): Promise<Buffer | null> {
+  return new Promise((resolve) => {
+    execFile('git', [...GIT_HARDENING_ARGS, ...args], {
+      cwd, timeout: timeoutMs, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024,
+      encoding: 'buffer', env: { ...process.env, ...GIT_HARDENING_ENV },
+    }, (err, stdout) => resolve(err ? null : stdout));
+  });
+}
+
 /** Append a pattern to git's `info/exclude` (idempotent, non-fatal). */
-async function excludeFromGit(repoRoot: string, pattern: string): Promise<void> {
+export async function excludeFromGit(repoRoot: string, pattern: string): Promise<void> {
   try {
     // Resolve the real exclude file: in a linked worktree (spec 006) `.git`
     // is a file and `info/exclude` lives in the shared common dir — which

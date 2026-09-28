@@ -1760,8 +1760,8 @@ describe('the hand-to-agent run (legacy three-way body)', () => {
       ?.body as { workflow?: string; steps?: Array<{ id: string; skill: string; prompt: string }> }
     expect(body.workflow).toBeUndefined()
     expect(body.steps).toEqual([
-      { id: 'om-fix', name: 'om-fix', skill: 'om-fix', prompt: '{{task}}' },
-      { id: 'g-review', name: 'g-review', skill: 'g-review', prompt: '{{task}}' },
+      { id: 'om-fix', name: 'om-fix', prompt: 'Use the om-fix skill.\n\n{{task}}' },
+      { id: 'g-review', name: 'g-review', prompt: 'Use the g-review skill.\n\n{{task}}' },
     ])
   })
 
@@ -1970,9 +1970,9 @@ describe('a remembered pick the catalog no longer has (#408)', () => {
       expect(sent.some((request) => request.method === 'POST' && request.path === '/api/v1/runs')).toBe(true),
     )
     const body = sent.find((request) => request.method === 'POST' && request.path === '/api/v1/runs')?.body as {
-      steps?: Array<{ skill: string }>
+      steps?: Array<{ prompt: string }>
     }
-    expect(body.steps?.map((step) => step.skill)).toEqual(['om-fix'])
+    expect(body.steps?.map((step) => step.prompt)).toEqual(['Use the om-fix skill.\n\n{{task}}'])
   })
 })
 

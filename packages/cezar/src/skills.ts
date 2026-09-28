@@ -210,6 +210,13 @@ async function readMarkdownSkills(dir: string, source: Skill['source']): Promise
   const paths = await skillEntryPaths(dir, 4, new Set());
   const skills: Skill[] = [];
   for (const absPath of paths) {
+    // Installed mirrors feed native harnesses, not the catalog. Otherwise a
+    // previously mirrored team skill would become a local winner on next read.
+    if (source === 'agents') {
+      const original = await realpath(absPath).catch(() => absPath);
+      if (original.includes('/.ai/cezar/tmp/native-skills/')) continue;
+      if (await stat(join(dirname(absPath), '.cezar-managed')).then(() => true, () => false)) continue;
+    }
     let raw: string;
     try {
       raw = await readFile(absPath, 'utf8');

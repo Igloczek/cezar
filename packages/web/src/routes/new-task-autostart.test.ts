@@ -14,9 +14,7 @@ const params = (over: Partial<NewTaskParams>): NewTaskParams => ({
   ...over,
 })
 
-/** The unattended-start wire shape — pinned against `handleDeepLink()` in web/app.js. The only
- *  deliberate difference from legacy is `prompt: '{{task}}'` instead of the literal ref (Step
- *  1.1's shape), identical after template substitution server-side. */
+/** The unattended-start wire shape after JSON serialization. */
 describe('bookmarkletRunBody', () => {
   const cases: Array<[name: string, input: NewTaskParams, body: CreateRunInput]> = [
     [
@@ -24,11 +22,7 @@ describe('bookmarkletRunBody', () => {
       params({ skill: 'om-fix', ref: 'https://github.com/o/r/pull/1' }),
       {
         task: 'https://github.com/o/r/pull/1',
-        steps: [{ id: 'task', name: 'om-fix', skill: 'om-fix', prompt: '{{task}}' }],
-        model: undefined,
-        runner: undefined,
-        variants: undefined,
-        images: undefined,
+        steps: [{ id: 'task', name: 'om-fix', prompt: 'Use the om-fix skill.\n\n{{task}}' }],
       },
     ],
     [
@@ -37,16 +31,12 @@ describe('bookmarkletRunBody', () => {
       {
         task: 'do the thing',
         workflow: 'quick-task',
-        model: undefined,
-        runner: undefined,
-        variants: undefined,
-        images: undefined,
       },
     ],
   ]
   for (const [name, input, body] of cases) {
     it(name, () => {
-      expect(bookmarkletRunBody(input, 'claude', 'claude')).toEqual(body)
+      expect(JSON.parse(JSON.stringify(bookmarkletRunBody(input, 'claude', 'claude')))).toEqual(body)
     })
   }
 

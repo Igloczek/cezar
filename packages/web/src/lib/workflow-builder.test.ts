@@ -63,8 +63,7 @@ describe('skillStep / insertStep (palette → canvas add)', () => {
     expect(skillStep('om-fix', [])).toEqual({
       id: 'om-fix',
       name: 'om-fix',
-      skill: 'om-fix',
-      prompt: '{{task}}',
+      prompt: 'Use the om-fix skill.\n\n{{task}}',
     })
   })
 
@@ -72,8 +71,8 @@ describe('skillStep / insertStep (palette → canvas add)', () => {
     let steps: WorkflowStepDef[] = []
     for (let i = 0; i < 3; i++) steps = insertStep(steps, skillStep('om-fix', steps), steps.length)
     expect(steps.map((s) => s.id)).toEqual(['om-fix', 'om-fix-2', 'om-fix-3'])
-    // Still a pure stack — the shorthand repeats the skill.
-    expect(skillStack(steps)).toEqual(['om-fix', 'om-fix', 'om-fix'])
+    // New palette steps serialize as native instructions, never legacy `skills:`.
+    expect(skillStack(steps)).toBeNull()
   })
 
   it('inserts at the drop index and clamps out-of-range indexes', () => {

@@ -2508,20 +2508,10 @@ describe('native Codex requestUserInput parks and resumes the run (#565)', () =>
 });
 
 /**
- * #811 — registry `/skill` expansion on the CONTINUATION path.
- *
- * `expandRegistrySlashSkill` (#676) reads `state.skills`, which only `execute` ever
- * populated. `runContinuation` builds its OWN `ActiveRun`, so a Reply into a finished
- * run — and every restart recovery, which routes through `continueRun` — expanded
- * against an empty registry and handed the raw `/om-...` to the backend, which answered
- * "Unknown skill". Two seams have to hold: the continuation's opening prompt (the
- * session's `userPrompt`, which never passes through `deliverMessage`) and the
- * follow-ups delivered into that same session.
- *
- * The mock CLI echoes the prompt it received (`Okay — looking into: …`), so the
- * transcript is a faithful witness of what actually reached the backend.
+ * Native skills are installed on disk; a continuation and its live follow-ups
+ * deliver the user's prompt unchanged to the harness.
  */
-describe('registry /skill expansion survives a continuation (#811)', () => {
+describe('native skill messages survive a continuation', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
@@ -2587,7 +2577,7 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
     return record.id;
   };
 
-  it("expands the continuation's OPENING prompt before it becomes the session userPrompt", async () => {
+  it("preserves the continuation's opening prompt", async () => {
     const id = await finishedRun();
     expect(manager.continueRun(id, { text: '/demo-review look at the diff' })).toEqual({ ok: true });
     await waitFor(() =>
@@ -2597,27 +2587,24 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
     const echoed = eventsOf(id).find(
       (e) => e.stepId === 'continue-1' && e.type === 'text' && e.text?.includes('looking into'),
     );
-    // The backend saw the expanded skill prompt, NOT a bare slash command it would
-    // reject as an unknown skill.
-    expect(echoed?.text).toContain('Selected skill: /demo-review');
-    expect(echoed?.text).not.toContain('/demo-review look at the diff');
+    expect(echoed?.text).toContain('/demo-review look at the diff');
+    expect(echoed?.text).not.toContain('Skill instructions:');
 
-    // Delivery-only: the transcript still shows what the user actually typed.
     const typed = eventsOf(id).find((e) => e.type === 'user-message' && e.stepId === 'continue-1');
     expect(typed?.text).toBe('/demo-review look at the diff');
   }, 40_000);
 
-  it('expands a FOLLOW-UP delivered into the reopened continuation session', async () => {
+  it('preserves a follow-up delivered into the reopened continuation session', async () => {
     const id = await finishedRun();
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     await waitFor(() => store.getRun(id)?.status === 'waiting');
 
     expect(manager.sendMessage(id, [{ type: 'text', text: '/demo-review now review it' }])).toBe(true);
     await waitFor(() =>
-      eventsOf(id).filter((e) => e.type === 'text' && e.text?.includes('Selected skill: /demo-review')).length > 0,
+      eventsOf(id).filter((e) => e.type === 'text' && e.text?.includes('/demo-review now review it')).length > 0,
     );
     expect(
-      eventsOf(id).some((e) => e.type === 'text' && e.text?.includes('Selected skill: /demo-review')),
+      eventsOf(id).some((e) => e.type === 'text' && e.text?.includes('/demo-review now review it')),
     ).toBe(true);
   }, 40_000);
 
@@ -2635,17 +2622,9 @@ describe('registry /skill expansion survives a continuation (#811)', () => {
 });
 
 /**
- * #278 — registry `/skill` expansion on a FRESH run's OPENING prompt.
- *
- * A task STARTED with `/om-...` as its first message is delivered straight to
- * `startSession` inside `execute`, never through `deliverMessage`, and #811 only
- * patched the continuation seam. So the opening prompt leaked the raw slash to the
- * backend, which answered "Unknown command" even though Cezar lists the skill.
- *
- * The mock CLI echoes the prompt it received (`Okay — looking into: …`), so the
- * transcript is a faithful witness of what actually reached the backend.
+ * A fresh task also delivers the user's prompt unchanged.
  */
-describe("registry /skill expansion on a fresh run's opening prompt (#278)", () => {
+describe("native skill messages on a fresh run", () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;
@@ -2705,7 +2684,7 @@ describe("registry /skill expansion on a fresh run's opening prompt (#278)", () 
     }
   };
 
-  it('expands the opening prompt before it reaches the backend', async () => {
+  it('preserves the opening prompt before it reaches the backend', async () => {
     const record = manager.startRun(SINGLE_STEP, {
       task: '/demo-review look at the diff',
       worktree: false,
@@ -2720,10 +2699,8 @@ describe("registry /skill expansion on a fresh run's opening prompt (#278)", () 
     const echoed = eventsOf(record.id).find(
       (e) => e.stepId === 'task' && e.type === 'text' && e.text?.includes('looking into'),
     );
-    // The backend saw the expanded skill prompt, NOT the bare slash command it would
-    // reject as an unknown command.
-    expect(echoed?.text).toContain('Selected skill: /demo-review');
-    expect(echoed?.text).not.toContain('/demo-review look at the diff');
+    expect(echoed?.text).toContain('/demo-review look at the diff');
+    expect(echoed?.text).not.toContain('Skill instructions:');
   }, 40_000);
 
   it('leaves an unknown slash command untouched so backend-native commands still work', async () => {

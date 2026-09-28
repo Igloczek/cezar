@@ -199,7 +199,7 @@ describe('AutomationEditor — new', () => {
     const post = sent.find((request) => request.method === 'POST' && request.path === '/api/v1/automations')
     expect((post?.body as { task: unknown }).task).toEqual({
       prompt: 'Bump the deps.',
-      steps: [{ id: 'task', name: 'om-review', skill: 'om-review', prompt: '{{task}}' }],
+      steps: [{ id: 'task', name: 'om-review', prompt: 'Use the om-review skill.\n\n{{task}}' }],
       autonomous: true,
     })
   })

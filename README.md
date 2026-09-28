@@ -133,8 +133,7 @@ A workflow is a small YAML file in `.ai/cezar/workflows/`:
 name: fix-and-verify
 steps:
   - id: implement
-    prompt: "{{task}}"
-    skill: project-conventions   # optional: a Markdown skill from .ai/skills
+    prompt: "Use the project-conventions skill. {{task}}"
     runner: codex                # optional: which agent runs this step
   - id: verify
     command: "npm test"          # exit 0 = pass

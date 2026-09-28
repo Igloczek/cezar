@@ -158,8 +158,8 @@ describe('palette add / remove / the 8-step limit', () => {
 
     fireEvent.click(addButton('om-fix'))
     expect(stepIds()).toEqual(['om-fix', 'om-review', 'om-fix-2'])
-    expect(screen.getByText('3 skills')).toBeTruthy()
-    expect(yamlText().match(/- om-fix/g)).toHaveLength(2)
+    expect(screen.getByText('3 steps')).toBeTruthy()
+    expect(yamlText().match(/id: om-fix/g)).toHaveLength(2)
   })
 
   it('remove drops exactly that card', async () => {

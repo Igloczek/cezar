@@ -35,7 +35,11 @@ export function pendingPlanOf(
 ): PendingPlan {
   return {
     task,
-    steps: [...response.steps],
+    steps: response.steps.map((step) => {
+      if (!step.skill) return step
+      const { skill, ...nativeStep } = step
+      return { ...nativeStep, prompt: `Use the ${skill} skill.\n\n${step.prompt ?? '{{task}}'}` }
+    }),
     rationale: response.rationale,
     fallback: response.fallback,
     images: [...images],

@@ -840,7 +840,7 @@ function StepCardBody({
       ? (known?.description ??
         'Not in this repo or the team skills — the step runs on its plain prompt.')
       : (step.prompt ?? '')
-  const badge = isCheck ? 'check' : step.skill ? (known ? null : 'unknown') : 'prompt'
+  const badge = isCheck ? 'check' : step.skill ? (known ? 'legacy' : 'unknown') : 'prompt'
 
   return (
     <div
@@ -880,10 +880,12 @@ function StepCardBody({
       {badge ? (
         <span
           data-slot="wb-step-badge"
+          title={badge === 'legacy' ? 'This saved step still injects skill instructions into the prompt. Replace it with a plain prompt to use native loading.' : undefined}
           className={cn(
             'shrink-0 rounded-full border px-2 py-px font-mono text-[10.5px]',
             badge === 'check' && 'border-success/30 text-success',
             badge === 'unknown' && 'border-danger/35 text-danger',
+            badge === 'legacy' && 'border-warning/35 text-warning',
             badge === 'prompt' && 'border-border text-soft-foreground',
           )}
         >

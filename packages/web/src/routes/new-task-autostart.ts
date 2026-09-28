@@ -14,14 +14,13 @@ import type { NewTaskParams } from './new-task-params'
  *  - `auto=1` + a wrong/missing key (or an unreachable key endpoint) → BLOCKED: prefill
  *    only, the user presses Start;
  *  - no `auto` → prefill + a toast;
- *  - the skill name is NOT validated client-side — the server starts the run and notes
- *    "skill not found … running with the plain prompt" (src/workflows/run.ts). Blocking an
- *    unknown skill here would break saved bookmarklets that legacy honored.
+ *  - the skill name is NOT validated client-side; the runner receives a plain instruction
+ *    to use it. Blocking an unknown skill here would break saved bookmarklets.
  */
 
 /** The exact unattended-start body. Legacy sent the ref as the literal step prompt with
- *  `task: ref` alongside; Step 1.1's `buildCreateRunBody` sends `prompt: '{{task}}'` with the
- *  same `task` — identical after template substitution, and pinned that way so the bookmarklet
+ *  `task: ref` alongside; `buildCreateRunBody` sends a native skill instruction with
+ *  `{{task}}` — pinned here so the bookmarklet
  *  path and the composer submit can never drift apart. The runner stays absent when the
  *  resolved connected runner is the server default; a connected fallback is explicit so the
  *  server cannot resolve the request back to a disconnected default. */

@@ -120,7 +120,7 @@ describe('fromDefinition / toBody', () => {
     const skillSteps = [{ id: 'task', name: 'om-review', skill: 'om-review', prompt: '{{task}}' }]
     const skill = fromDefinition({ ...SCHEDULE_DEF, task: { prompt: 'p', steps: skillSteps } })
     expect(sourceOf(skill)).toEqual({ source: 'skill', ref: 'om-review' })
-    expect(toBody(skill).task).toEqual({ prompt: 'p', steps: skillSteps, autonomous: false })
+    expect(toBody(skill).task).toEqual({ prompt: 'p', steps: [{ id: 'task', name: 'om-review', prompt: 'Use the om-review skill.\n\n{{task}}' }], autonomous: false })
 
     const planSteps = [{ id: 'plan', prompt: 'Plan it' }, { id: 'do', skill: 'om-fix', prompt: '{{task}}' }]
     const custom = fromDefinition({ ...SCHEDULE_DEF, task: { prompt: 'p', steps: planSteps } })

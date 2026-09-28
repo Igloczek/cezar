@@ -286,8 +286,7 @@ export function resolveSource(
 
 /**
  * The exact `POST /api/runs` body the legacy form sends:
- *  - a skill runs as a one-step inline chain (spec 008's API — the same shape the inbox and
- *    the bookmarklet auto-start use): `steps: [{ id: 'task', name, skill, prompt: '{{task}}' }]`;
+ *  - a selected skill becomes a plain instruction for the harness's native loader;
  *  - a workflow goes by name;
  *  - NO source (`null` — the composer's empty state) goes by the built-in `quick-task` name,
  *    because `POST /runs` requires exactly one of `workflow`/`steps`. That name is also what
@@ -352,7 +351,7 @@ export function buildCreateRunBody(opts: {
   return {
     task,
     ...(source?.source === 'skill'
-      ? { steps: [{ id: 'task', name: source.ref, skill: source.ref, prompt: '{{task}}' }] }
+      ? { steps: [{ id: 'task', name: source.ref, prompt: `Use the ${source.ref} skill.\n\n{{task}}` }] }
       : { workflow: source?.ref ?? QUICK_TASK }),
     model: modelsLocked ? undefined : model || undefined,
     runner: runnerOverride(runner, defaultRunner, runnerExplicit),

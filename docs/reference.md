@@ -27,9 +27,10 @@ Three words, no jargon — **task**, **skill**, **chain**:
   the live session while it works.
 - 📖 **Skills** are Markdown playbooks. Drop them in `.ai/skills/` or
   `.ai/cezar/skills/`, or pull them from a shared **team skills repo** (a bare
-  git clone cached globally in `~/.cache/cez/`). A workflow step references one by
-  `skill: <name>` and its body becomes the agent's extra system prompt — so you
-  shape *how* the agent reasons without touching code.
+  git clone cached globally in `~/.cache/cez/`). Cezar installs them in each task
+  worktree for the agent to read natively. Ask for a skill by name in a workflow
+  prompt. Existing saved `skill: <name>` steps still inject the body temporarily
+  and display a migration warning.
 - 🔗 **Chains (workflows)** stitch steps into a pipeline: agent steps plus shell
   checks, with bounded `onFail` retry loops. Write the YAML yourself, build one by
   drag-ordering skills in the **Workflows** tab, or press **Plan first** and let the
@@ -238,8 +239,7 @@ description: Implement the task, then verify; retry with failing output on red.
 steps:
   - id: implement
     name: Implement
-    prompt: "{{task}}"
-    skill: project-conventions   # optional — from .ai/skills or .ai/cezar/skills
+    prompt: "Use the project-conventions skill. {{task}}"
     # model: opus                # optional per-step model override
     # runner: codex              # optional per-step backend: claude · codex · opencode · pi
     # allowedTools: [Read, Edit, Write, Grep, Glob, Bash]
@@ -473,7 +473,7 @@ never blocks startup):
 ```jsonc
 {
   "skillsRepos": [{ "repo": "open-mercato/skills", "ref": "main" }], // team skills; [] disables
-  // Team-skill repos are code-trusted: a skill body becomes an agent system prompt.
+  // Team-skill repos are code-trusted: agents read their instructions and assets.
   // Only owner/name, https/ssh URLs, or local paths (`/abs`, `./rel`, `~/dir`,
   // `C:\dir`) are accepted — no ext::/fd:: transport helpers. Write a relative
   // path as `./name`, not a bare `name`. Pin `ref` to a full commit SHA to freeze

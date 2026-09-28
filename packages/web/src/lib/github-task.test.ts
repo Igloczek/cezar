@@ -58,8 +58,8 @@ describe('githubTaskPrompt', () => {
 describe('skillChainSteps', () => {
   it('one {{task}} step per skill, in selection order', () => {
     expect(skillChainSteps(['om-fix', 'om-review'])).toEqual([
-      { id: 'om-fix', name: 'om-fix', skill: 'om-fix', prompt: '{{task}}' },
-      { id: 'om-review', name: 'om-review', skill: 'om-review', prompt: '{{task}}' },
+      { id: 'om-fix', name: 'om-fix', prompt: 'Use the om-fix skill.\n\n{{task}}' },
+      { id: 'om-review', name: 'om-review', prompt: 'Use the om-review skill.\n\n{{task}}' },
     ])
   })
 
@@ -88,7 +88,7 @@ describe('githubRunBody', () => {
   it('skills only → the skills ARE the chain, and the prompt carries no hint sentence', () => {
     const body = githubRunBody(item(), null, ['om-fix', 'om-review'])
     expect(body.workflow).toBeUndefined()
-    expect(body.steps?.map((step) => step.skill)).toEqual(['om-fix', 'om-review'])
+    expect(body.steps?.map((step) => step.prompt)).toEqual(['Use the om-fix skill.\n\n{{task}}', 'Use the om-review skill.\n\n{{task}}'])
     expect(body.task).not.toContain('Use these skills')
   })
 
@@ -115,7 +115,7 @@ describe('githubRunBody', () => {
 
     // The skills-ARE-the-chain branch keeps carrying no hint sentence.
     const chain = githubRunBody(item(), null, ['om-fix'], 'Investigate only.')
-    expect(chain.steps?.map((step) => step.skill)).toEqual(['om-fix'])
+    expect(chain.steps?.map((step) => step.prompt)).toEqual(['Use the om-fix skill.\n\n{{task}}'])
     expect(chain.task).not.toContain('Use these skills')
   })
 
@@ -281,7 +281,7 @@ describe('githubRunBody backend (#401)', () => {
       runner: 'opencode',
       model: 'anthropic/claude-sonnet-5',
     })
-    expect(body.steps?.map((step) => step.skill)).toEqual(['om-fix', 'om-review'])
+    expect(body.steps?.map((step) => step.prompt)).toEqual(['Use the om-fix skill.\n\n{{task}}', 'Use the om-review skill.\n\n{{task}}'])
     expect(body).toMatchObject({ runner: 'opencode', model: 'anthropic/claude-sonnet-5' })
   })
 

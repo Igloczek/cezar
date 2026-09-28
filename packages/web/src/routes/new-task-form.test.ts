@@ -272,7 +272,7 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
     expect(JSON.parse(JSON.stringify(body))).toEqual({ task: 'just do it', workflow: 'quick-task' })
   })
 
-  it('skill source → the one-step inline chain (spec 008: same shape as inbox/bookmarklet)', () => {
+  it('skill source → a plain instruction for native loading', () => {
     const body = buildCreateRunBody({
       task: 'fix the flake',
       source: { source: 'skill', ref: 'om-fix' },
@@ -284,7 +284,7 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
     })
     expect(JSON.parse(JSON.stringify(body))).toEqual({
       task: 'fix the flake',
-      steps: [{ id: 'task', name: 'om-fix', skill: 'om-fix', prompt: '{{task}}' }],
+      steps: [{ id: 'task', name: 'om-fix', prompt: 'Use the om-fix skill.\n\n{{task}}' }],
       model: 'sonnet',
       runner: 'claude',
     })
@@ -430,7 +430,7 @@ describe('pushRecentSource (recency, #picker)', () => {
 
 describe('buildAutomationTask', () => {
   it('uses the New task serializer while dropping one-shot transport fields', () => {
-    expect(buildAutomationTask({
+    expect(JSON.parse(JSON.stringify(buildAutomationTask({
       task: 'Review {{github.url}}',
       source: { source: 'skill', ref: 'om-code-review' },
       model: 'opus',
@@ -440,9 +440,9 @@ describe('buildAutomationTask', () => {
       images: [{ mediaType: 'image/png', data: 'ignored' }],
       autonomous: true,
       todoId: 'ignored',
-    })).toEqual({
+    })))).toEqual({
       prompt: 'Review {{github.url}}',
-      steps: [{ id: 'task', name: 'om-code-review', skill: 'om-code-review', prompt: '{{task}}' }],
+      steps: [{ id: 'task', name: 'om-code-review', prompt: 'Use the om-code-review skill.\n\n{{task}}' }],
       model: 'opus',
       variants: 2,
       autonomous: true,

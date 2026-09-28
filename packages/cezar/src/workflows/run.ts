@@ -44,7 +44,7 @@ import type { AgentEvent, ContentBlock } from '../core/agent-runner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
 import { automationsReachable } from '../automations/builtin-skill.ts';
 import { AUTOMATIONS_PROMPT } from '../automations/prompts.ts';
-import { materializeSkillDir } from '../skills-remote.ts';
+import { installSkills } from '../skills-install.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
@@ -345,9 +345,6 @@ interface ActiveRun {
    *  cannot answer (a disabled capability, a missing credential), and parks instead of burning
    *  the remaining nudges — the live-session lesson behind `tryAutonomousNudge`. */
   lastOverriddenAsk?: string;
-  /** Registry snapshot used to expand `/skill` follow-ups before a backend can
-   *  mistake them for its own slash commands (#676). */
-  skills?: Skill[];
   /**
    * The dispatch prompt this session runs under (spec 2026-09-10-dispatch), resolved by
    * `prepareDispatchSession` — which BOTH construction sites call, because `ActiveRun` is built in
@@ -3101,11 +3098,10 @@ export class RunManager {
     // at all for a non-image attachment (#950), which is why `contentBlocksOf` drops file blocks
     // here rather than letting one reach a backend that has no idea what it is.
     const blocks = contentBlocksOf(content);
-    const expanded = userAuthored ? expandRegistrySlashSkill(blocks, state.skills ?? []) : blocks;
     const deliverable = persisted.length
-      ? [...expanded, pastedAttachmentsNote(persisted, this.attachmentLibraryHint(persisted) ??
+      ? [...blocks, pastedAttachmentsNote(persisted, this.attachmentLibraryHint(persisted) ??
           (imageLibraryWrites.length ? attachmentLibraryDir(this.dataDir) : undefined))]
-      : expanded;
+      : blocks;
     const delivered = state.session.sendMessage(deliverable);
     if (delivered) {
       for (const write of imageLibraryWrites) write();
@@ -3379,11 +3375,13 @@ export class RunManager {
     }
     this.armAutosave(state);
     if (record) seedHandoffFile(this.dataDir, record); // idempotent — normally already there
-    // Registry snapshot for `/skill` expansion. `execute` loads this for the workflow's own
-    // sessions; a continuation builds its OWN ActiveRun, and without this the resumed session
-    // expanded against an empty registry and leaked `/om-...` verbatim to the backend, which
-    // answered "Unknown skill" (#811). Best-effort — discovery must never break Continue.
-    state.skills = await discoverSkills(this.repoRoot).catch(() => [] as Skill[]);
+    // Rebuild native skill links after retention restores a worktree.
+    const skills = await discoverSkills(this.repoRoot).catch(() => [] as Skill[]);
+    if (process.env.CEZ_DRY_RUN !== '1') {
+      for (const warning of await installSkills(state.cwd, skills).catch((error) => [`skill installation failed: ${String(error)}`])) {
+        this.store.appendEvent(runId, { type: 'note', message: warning });
+      }
+    }
     // The dispatch session snapshot — the SECOND of the two `ActiveRun` construction
     // sites (spec 2026-09-10-dispatch; AGENTS.md § "every construction site"). A Continue
     // that skipped this would resume a task with no dispatch prompt and no way to dispatch:
@@ -3644,18 +3642,13 @@ export class RunManager {
     const runner = createRunner(continueBackend);
     state.currentStepId = stepId;
     this.beginUsageInvocation(runId, state, stepId);
-    // A continuation's opening message becomes the session's `userPrompt` and never passes
-    // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
-    // live path applies (#811). Delivery-only: the `user-message` event above already
-    // persisted the user's original text, and the transcript must keep showing that.
-    const expandedPrompt = expandRegistrySlashSkillText(prompt, state.skills ?? []);
     // Reports that arrived while this run had no session (spec Q7) open the continuation, ahead
     // of whatever prompted it — a commander resumed by its own children's reports has to be told
-    // what they said. Delivery-only, like the `/skill` rewrite above.
+    // what they said.
     const treeReports = this.flushPendingReports(runId);
     const treeInbox = this.flushInbox(runId);
     const treeBlocks = [treeReports, treeInbox].filter((block): block is string => Boolean(block));
-    const openingPrompt = treeBlocks.length ? `${treeBlocks.join('\n\n')}\n\n---\n\n${expandedPrompt}` : expandedPrompt;
+    const openingPrompt = treeBlocks.length ? `${treeBlocks.join('\n\n')}\n\n---\n\n${prompt}` : prompt;
     // The previous runner's portable context (#954) opens the session first, then the tree
     // blocks above, then the instruction that prompted this continuation.
     const contextualOpeningPrompt = portableContext
@@ -3896,9 +3889,11 @@ export class RunManager {
     if (seeded) seedHandoffFile(this.dataDir, seeded);
 
     const skills = await discoverSkills(this.repoRoot);
-    // Every ActiveRun construction site must carry the registry — `runContinuation` builds
-    // its own, and the one that skipped this leaked raw `/skill` text to the backend (#811).
-    state.skills = skills;
+    if (process.env.CEZ_DRY_RUN !== '1') {
+      for (const warning of await installSkills(state.cwd, skills).catch((error) => [`skill installation failed: ${String(error)}`])) {
+        emit({ type: 'note', message: warning });
+      }
+    }
     // Same rule, same reason, for the dispatch session snapshot (the dispatch prompt; the child
     // role's prompt a spawn will need). This is the FIRST of the two construction sites; the
     // twin is in `runContinuation`.
@@ -4122,20 +4117,7 @@ export class RunManager {
         // numeric task such as "432" still gives the model enough context to
         // describe the work — and therefore derive a useful title (#432).
         systemPrompt = skillSystemPrompt(skill);
-        // Directory team skills (SKILL.md + references/) get materialized
-        // into <cwd>/.claude/skills/<name>/ — the run's worktree when there
-        // is one — so claude sees the companion files on disk; the shared
-        // info/exclude keeps them out of git (and out of autosave commits).
-        if (skill.source === 'team' && skill.team?.dir) {
-          const seeded = await materializeSkillDir(state.cwd, skill).catch(() => false);
-          if (seeded) {
-            emit({
-              type: 'note',
-              stepId: step.id,
-              message: `team skill "${skill.name}" materialized to .claude/skills/${skill.name}/`,
-            });
-          }
-        }
+        emit({ type: 'note', stepId: step.id, message: `legacy workflow skill: "${skill.name}" still uses prompt injection; migrate this step to a plain prompt to use native loading` });
       } else {
         emit({
           type: 'note',
@@ -4146,18 +4128,9 @@ export class RunManager {
     }
 
     let userPrompt = applyTemplate(step.prompt ?? '{{task}}', input.task);
-    // A fresh run's OPENING prompt is delivered straight to `startSession`, never through
-    // `deliverMessage`, so — like the continuation seam above (#811) — it needs the same
-    // delivery-only `/skill` rewrite. Without it a task STARTED with `/om-...` as its first
-    // message leaks the raw slash to the backend, which answers "Unknown command" even though
-    // Cezar lists the skill (#278). `state.skills` was populated by `discoverSkills` earlier in
-    // `execute`. Expand before the chain/check/attachment prefixes so the leading slash still
-    // matches; a leading `/name` that is not a known skill passes through byte-for-byte.
-    userPrompt = expandRegistrySlashSkillText(userPrompt, state.skills ?? []);
     if (chainNote) userPrompt = `${chainNote}\n\n---\n\n${userPrompt}`;
     // A commander recovered after a restart opens its first session holding whatever its children
-    // reported while it was gone (spec Q7). Prepended and cleared here, after the slash expansion
-    // so a leading `/skill` still matched, and before the failure/attachment suffixes.
+    // reported while it was gone (spec Q7). Prepended before failure/attachment suffixes.
     const treeReports = this.flushPendingReports(runId);
     const treeInbox = this.flushInbox(runId);
     const treeBlocks = [treeReports, treeInbox].filter((block): block is string => Boolean(block));
@@ -5268,49 +5241,4 @@ export function skillSystemPrompt(
   }
   lines.push('', 'Skill instructions:', skill.body.trim());
   return lines.join('\n');
-}
-
-/**
- * Expand a registry-backed slash skill in one prompt string before it reaches a
- * backend. Claude otherwise intercepts an unknown leading slash command, and
- * Codex/OpenCode have no native slash-skill lookup at all (#676).
- *
- * Only a match at character zero counts, and unknown commands pass through
- * byte-for-byte — a backend's OWN slash commands must keep working. The caller
- * persists the original user text before applying this delivery-only rewrite.
- *
- * Both delivery seams route through here: live-session messages via
- * `expandRegistrySlashSkill`, and a continuation's opening prompt, which becomes
- * the session's `userPrompt` and never passes through `deliverMessage` at all
- * (#811).
- */
-export function expandRegistrySlashSkillText(text: string, skills: readonly Skill[]): string {
-  const match = /^\/([A-Za-z0-9][A-Za-z0-9._-]*)(?=\s|$)/.exec(text);
-  if (!match) return text;
-  const skill = skills.find((candidate) => candidate.name === match[1]);
-  if (!skill) return text;
-
-  const request = text.slice(match[0].length).trim();
-  return request ? `${skillSystemPrompt(skill)}\n\nUser request:\n${request}` : skillSystemPrompt(skill);
-}
-
-/**
- * `expandRegistrySlashSkillText` over a live chat message: only the first text
- * block is eligible, and an unchanged block returns the caller's array
- * identity untouched.
- */
-export function expandRegistrySlashSkill(
-  content: ContentBlock[],
-  skills: readonly Skill[],
-): ContentBlock[] {
-  const textIndex = content.findIndex((block) => block.type === 'text');
-  if (textIndex < 0) return content;
-  const block = content[textIndex];
-  if (!block || block.type !== 'text') return content;
-  const text = expandRegistrySlashSkillText(block.text, skills);
-  if (text === block.text) return content;
-
-  const expanded = [...content];
-  expanded[textIndex] = { type: 'text', text };
-  return expanded;
 }

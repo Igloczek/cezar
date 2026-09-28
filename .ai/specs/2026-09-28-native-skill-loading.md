@@ -1,6 +1,6 @@
 # Filesystem-only skill management across agent backends
 
-Status: proposal · 2026-09-28
+Status: first implementation · 2026-09-28
 
 ## Problem and why the current design exists
 
@@ -42,17 +42,17 @@ with copies where symlinks are unavailable. Its `skills use` command also
 generates prompts; that is a separate feature and **not** the model here.
 
 Cezar may discover, fetch, update, display, and install skills. Installation
-runs when the catalog changes and when a task worktree is created or recovered,
-not when a message is delivered or an agent session starts. Cezar must not
-alter `userPrompt`, `systemPrompt`, or message blocks because of a skill name.
+runs while preparing a task worktree, including recovery. It uses the catalog
+already available in the process, without waiting for a network refresh.
 The agent's native loader owns skill selection, Markdown parsing, references,
-and calls to other skills.
+and calls to other skills. A later phase can reconcile the project checkout
+when a team catalog update finishes; this phase guarantees the task checkout.
 
 1. Keep current discovery locations, precedence, API source values, and
    `importedSkills` selection. A missing team repo still degrades quietly. Do
    not require a new setting or rewrite a user's installation.
-2. Install the **complete effective catalog** in the project and each task
-   worktree during filesystem setup and reconcile it after catalog changes.
+2. Install the **complete effective catalog available at task preparation** in
+   each task worktree during filesystem setup.
    Preserve references, scripts, assets, and file modes. Link each skill into
    `.agents/skills/<name>/` for Codex, OpenCode, and Pi; link it into
    `.claude/skills/<name>/` for Claude Code. Copy where
@@ -64,15 +64,15 @@ and calls to other skills.
    extract the complete directory from the cached revision. Generated files
    must stay out of task diffs without hiding real untracked skills in the
    main checkout.
-4. Remove `skillSystemPrompt`, `expandRegistrySlashSkill*`, and the
-   selected-only `.claude/skills` materialization once the filesystem step
-   covers each source. A raw user message, including `/name`, reaches the
-   harness byte-for-byte. Cezar neither translates it into another command
-   nor adds a “use this skill” hint.
+4. Remove `expandRegistrySlashSkill*` and the selected-only `.claude/skills`
+   materialization. A raw user message, including `/name`, reaches the
+   harness byte-for-byte. Keep `skillSystemPrompt` only for saved legacy
+   workflow steps with `skill:` and emit a migration warning. All new task
+   paths create plain prompts that ask the harness to use the named skill.
 
 This eliminates three prompt-delivery paths and the selected-skill special
-case. Session delivery in `run.ts` no longer needs skill-specific branches.
-Only the installation boundary knows where skill files belong. A future
+case for new tasks. Only the installation boundary knows where skill files
+belong. A future
 harness can use the same canonical files through its documented loader path.
 
 ## Authoring nested skills
@@ -94,15 +94,13 @@ is a Cezar command even when the selected harness has no such command. Removing
 either changes working behavior. Do **not** leave `skill:` accepted while
 silently turning it into mere availability metadata.
 
-The migration should stop creating new `skill:` steps in the workflow editor,
-surface existing steps as legacy, and provide an explicit path to author an
-ordinary `prompt:` step with the desired instruction. The same applies to the
-New Task skill picker and chat `/name` autocomplete: they must either become
-catalog-only UI or use an actual harness-native invocation surface, with no
-hidden message rewrite. Existing saved workflows need a documented versioned
-transition under `BACKWARD_COMPATIBILITY.md` §4–5 before the legacy runtime
-path is deleted. Keeping the old injector temporarily during migration is a
-compatibility phase, **not** the target architecture.
+The workflow editor, New Task picker, GitHub task generator, automations editor,
+and inbox task starter now create ordinary `prompt:` steps. Existing saved
+`skill:` workflows are labeled legacy and still inject their body with a run
+warning, as requested for this transition. Chat `/name` is sent unchanged to
+the chosen harness; authors should use that harness's native invocation syntax
+or plain language. The legacy injector can be deleted after saved workflows
+have a migration path under `BACKWARD_COMPATIBILITY.md` §4–5.
 
 ## Compatibility and proof before replacing the old path
 
@@ -111,16 +109,20 @@ compatibility phase, **not** the target architecture.
   `BACKWARD_COMPATIBILITY.md` §5. Do not make previously valid flat skills
   disappear from the catalog.
 - A test skill A references skill B and `references/rules.md`; the task
-  worktree must expose both full directories to all four current backends,
-  even when only A is selected. Test local, global, and team sources, name
-  collisions, and a curated `importedSkills` list.
+  worktree exposes both full directories through `.agents/skills` and
+  `.claude/skills`, including binary assets and executable file modes.
 - Pin fresh-run, live-message, Continue, and restart paths. Assert the runner
   receives the user's text byte-for-byte, without skill body, absolute path,
   translated slash command, or name-only hint; prove that the test fails
   against the old behavior.
-- Verify a clean task Git status, preserved source installations, an offline
-  team repo, and an in-place run. Installation failures are reported at the
+- Verify a clean task Git status and preserved source installations. Installation failures are reported at the
   catalog/worktree boundary; message delivery never compensates with a prompt.
+
+The local E2E check launched Cezar with two fixture skills and a Codex task.
+Codex's `skills/list` reported both as repository skills, and the run read the
+second skill and the first skill's reference file before producing the expected
+output. Other harnesses are covered by directory contract tests; they were not
+available as authenticated local runners for this check.
 
 The shared directory covers Cezar's four current backends. No orchestrator
 can promise discovery by an arbitrary future harness with an unknown private

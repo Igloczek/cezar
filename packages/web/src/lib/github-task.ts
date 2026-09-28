@@ -124,7 +124,7 @@ export function skillChainSteps(names: readonly string[]): WorkflowStepDef[] {
     const used = new Set(steps.map((step) => step.id))
     let id = name
     for (let n = 2; used.has(id); n++) id = `${name}-${n}`
-    steps.push({ id, name, skill: name, prompt: '{{task}}' })
+    steps.push({ id, name, prompt: `Use the ${name} skill.\n\n{{task}}` })
   }
   return steps
 }

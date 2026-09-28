@@ -4977,8 +4977,7 @@ export function createApp(deps: ServerDeps) {
                 {
                   id: 'task',
                   name: 'Do the task',
-                  skill: todo.suggestedSkill,
-                  prompt: '{{task}}',
+                  prompt: `Use the ${todo.suggestedSkill} skill.\n\n{{task}}`,
                 },
               ],
             };

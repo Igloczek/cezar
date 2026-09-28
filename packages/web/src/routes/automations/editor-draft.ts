@@ -82,13 +82,15 @@ type TaskSteps = NonNullable<AutomationDefinition['task']['steps']>
 
 /** The one-step chain a picked skill runs as — `buildCreateRunBody`'s shape, verbatim. */
 function skillSteps(skill: string): TaskSteps {
-  return [{ id: 'task', name: skill, skill, prompt: '{{task}}' }]
+  return [{ id: 'task', name: skill, prompt: `Use the ${skill} skill.\n\n{{task}}` }]
 }
 
 /** A stored `steps` that IS a picked skill reads back as that skill; anything else stays custom. */
 function skillOfSteps(steps: TaskSteps | undefined): string | null {
   const [only, ...rest] = steps ?? []
-  return only && rest.length === 0 && only.skill && only.prompt === '{{task}}' ? only.skill : null
+  if (!only || rest.length !== 0) return null
+  if (only.skill && only.prompt === '{{task}}') return only.skill // legacy saved automation
+  return only.name && only.prompt === `Use the ${only.name} skill.\n\n{{task}}` ? only.name : null
 }
 
 /** What the source pill shows: the skill, a non-default workflow, or nothing (quick-task). */

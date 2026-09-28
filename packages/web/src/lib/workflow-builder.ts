@@ -38,7 +38,7 @@ export function skillStep(skill: string, steps: readonly WorkflowStepDef[]): Wor
   const used = new Set(steps.map((s) => s.id))
   let id = skill
   for (let n = 2; used.has(id); n++) id = `${skill}-${n}`
-  return { id, name: skill, skill, prompt: '{{task}}' }
+  return { id, name: skill, prompt: `Use the ${skill} skill.\n\n{{task}}` }
 }
 
 /** Insert `step` at `at`, immutably. `at` clamps into range so a stale drop index cannot

@@ -184,6 +184,10 @@ const PLAN = {
   rationale: 'Implement, verify with tests, then review.',
   fallback: false,
 }
+const NATIVE_PLAN_STEPS = [
+  ...PLAN.steps.slice(0, 2),
+  { id: 'review', name: 'Review', prompt: 'Use the om-fix skill.\n\nReview the changes for {{task}}' },
+]
 
 const FALLBACK_PLAN = {
   steps: [{ id: 'task', name: 'Do the task', prompt: '{{task}}' }],
@@ -944,7 +948,7 @@ describe('provider authentication gate', () => {
 // ---- submit bodies (the wire contract) ---------------------------------------------------------
 
 describe('submit', () => {
-  it('a SKILL source posts the one-step inline chain and persists lastTask, then navigates', async () => {
+  it('a SKILL source requests native loading and persists lastTask, then navigates', async () => {
     draftSource({ source: 'skill', ref: 'om-fix' })
     serve({ createRun: { id: 'run-9' } })
     renderNewTask()
@@ -954,7 +958,7 @@ describe('submit', () => {
 
     expect(postedBody()).toEqual({
       task: 'Fix the flaky worktree test',
-      steps: [{ id: 'task', name: 'om-fix', skill: 'om-fix', prompt: '{{task}}' }],
+      steps: [{ id: 'task', name: 'om-fix', prompt: 'Use the om-fix skill.\n\n{{task}}' }],
       // Skills default to autonomous (#autonomous).
       autonomous: true,
     })
@@ -1040,7 +1044,7 @@ describe('submit', () => {
         label: 'om-fix',
         source: { source: 'skill', ref: 'om-fix' },
         overrides: {},
-        expected: { steps: [{ id: 'task', name: 'om-fix', skill: 'om-fix', prompt: '{{task}}' }] },
+        expected: { steps: [{ id: 'task', name: 'om-fix', prompt: 'Use the om-fix skill.\n\n{{task}}' }] },
       },
       {
         label: 'one-step',
@@ -1469,7 +1473,7 @@ describe('bookmarklet auto-start', () => {
     expect(runsPosted().map((request) => request.body)).toEqual([
       {
         task: 'hello',
-        steps: [{ id: 'task', name: 'deploy', skill: 'deploy', prompt: '{{task}}' }],
+        steps: [{ id: 'task', name: 'deploy', prompt: 'Use the deploy skill.\n\n{{task}}' }],
       },
     ])
   })
@@ -1499,13 +1503,13 @@ describe('bookmarklet auto-start', () => {
     expect(runsPosted().map((request) => request.body)).toEqual([
       {
         task: 'hello',
-        steps: [{ id: 'task', name: 'deploy', skill: 'deploy', prompt: '{{task}}' }],
+        steps: [{ id: 'task', name: 'deploy', prompt: 'Use the deploy skill.\n\n{{task}}' }],
         runner: 'claude',
       },
     ])
   })
 
-  it('valid key + auto=1 + skill/ref → starts unattended with the exact legacy body, then the thread', async () => {
+  it('valid key + auto=1 + skill/ref → starts unattended with native skill request, then the thread', async () => {
     serve()
     renderNewTask('/new?skill=deploy&ref=hello&auto=1&key=k-real')
     await waitFor(() => expect(screen.queryByTestId('elsewhere')).not.toBeNull())
@@ -1514,7 +1518,7 @@ describe('bookmarklet auto-start', () => {
     // The body pin: Step 1.1's skill-source shape, nothing else on the wire — no model, no
     // runner, no variants (legacy's bookmarklet start never sent them either).
     expect(runsPosted().map((r) => r.body)).toEqual([
-      { task: 'hello', steps: [{ id: 'task', name: 'deploy', skill: 'deploy', prompt: '{{task}}' }] },
+      { task: 'hello', steps: [{ id: 'task', name: 'deploy', prompt: 'Use the deploy skill.\n\n{{task}}' }] },
     ])
     expect(location()).toBe('/tasks/r1')
     // Unattended starts do not rewrite the sticky lastTask (legacy parity).
@@ -1537,7 +1541,7 @@ describe('bookmarklet auto-start', () => {
     expect(runsPosted().map((request) => request.body)).toEqual([
       {
         task: 'hello',
-        steps: [{ id: 'task', name: 'deploy', skill: 'deploy', prompt: '{{task}}' }],
+        steps: [{ id: 'task', name: 'deploy', prompt: 'Use the deploy skill.\n\n{{task}}' }],
         runner: 'codex',
       },
     ])
@@ -1576,7 +1580,7 @@ describe('bookmarklet auto-start', () => {
     renderNewTask('/new?skill=ghost&ref=hello&auto=1&key=k-real')
     await waitFor(() => expect(screen.queryByTestId('elsewhere')).not.toBeNull())
     expect(runsPosted().map((r) => r.body)).toEqual([
-      { task: 'hello', steps: [{ id: 'task', name: 'ghost', skill: 'ghost', prompt: '{{task}}' }] },
+      { task: 'hello', steps: [{ id: 'task', name: 'ghost', prompt: 'Use the ghost skill.\n\n{{task}}' }] },
     ])
   })
 
@@ -1739,14 +1743,14 @@ describe('the plan flow', () => {
     })
     expect(requests.some((r) => r.url === '/api/v1/runs' && r.method === 'POST')).toBe(false)
 
-    // Task line, rationale, numbered cards with skill/check badges and hints.
+    // Task line, rationale, numbered cards and the actual native skill prompt.
     expect(document.querySelector('[data-slot="plan-task"]')?.textContent).toBe(
       'Tighten the flaky suite',
     )
     expect(screen.getByText('Implement, verify with tests, then review.')).toBeTruthy()
     expect(stepIds()).toEqual(['implement', 'verify', 'review'])
     expect(document.querySelector('[data-slot="plan-badge-check"]')).not.toBeNull()
-    expect(document.querySelector('[data-slot="plan-badge-skill"]')?.textContent).toBe('om-fix')
+    expect(screen.getByText(/Use the om-fix skill/)).toBeTruthy()
     expect(screen.getByText('npm test')).toBeTruthy()
   })
 
@@ -1831,7 +1835,7 @@ describe('the plan flow', () => {
     expect(postedBody()).toEqual({
       task: 'Tighten the flaky suite',
       steps: [
-        { id: 'review', name: 'Review', skill: 'om-fix', prompt: 'Review the changes for {{task}}' },
+        { id: 'review', name: 'Review', prompt: 'Use the om-fix skill.\n\nReview the changes for {{task}}' },
         { id: 'implement', name: 'Implement', prompt: '{{task}}' },
       ],
     })
@@ -1853,7 +1857,7 @@ describe('the plan flow', () => {
     await waitFor(() => expect(postedBody()).toBeDefined())
     expect(postedBody()).toEqual({
       task: 'Plan with native settings',
-      steps: PLAN.steps,
+      steps: NATIVE_PLAN_STEPS,
     })
   })
 
@@ -1945,7 +1949,7 @@ describe('save as chain', () => {
     )
     expect(requests.find((r) => r.url === '/api/v1/workflows' && r.method === 'POST')?.body).toEqual({
       name: 'my chain',
-      steps: PLAN.steps,
+      steps: NATIVE_PLAN_STEPS,
     })
     // Dialog closes on success; the review itself stays open (start is a separate decision).
     await waitFor(() => expect(screen.queryByLabelText('Chain name')).toBeNull())
@@ -1973,7 +1977,7 @@ describe('save as chain', () => {
     await waitFor(() => {
       const saves = requests.filter((r) => r.url === '/api/v1/workflows' && r.method === 'POST')
       expect(saves).toHaveLength(2)
-      expect(saves[1]?.body).toEqual({ name: 'my chain', steps: PLAN.steps, overwrite: true })
+      expect(saves[1]?.body).toEqual({ name: 'my chain', steps: NATIVE_PLAN_STEPS, overwrite: true })
     })
     await waitFor(() => expect(screen.queryByLabelText('Chain name')).toBeNull())
   })
@@ -2090,7 +2094,7 @@ describe('prompt templates on the new-task composer', () => {
     // The auto-applied text is the real task text on the wire, not just something on screen.
     expect(postedBody()).toMatchObject({
       task: 'Follow the fix rules.',
-      steps: [{ id: 'task', name: 'om-fix', skill: 'om-fix', prompt: '{{task}}' }],
+      steps: [{ id: 'task', name: 'om-fix', prompt: 'Use the om-fix skill.\n\n{{task}}' }],
     })
   })
 })
