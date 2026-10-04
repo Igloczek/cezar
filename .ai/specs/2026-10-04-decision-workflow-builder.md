@@ -1,26 +1,26 @@
-# Decision workflow builder for Open Mercato skills
+# Unified workflow builder for Open Mercato skills
 
 > Status: proposed design and implementation spec · [Issue #12](https://github.com/Igloczek/cezar/issues/12) · Project: `Igloczek/cezar` only · Depends on [#10](https://github.com/Igloczek/cezar/issues/10) and [#11](https://github.com/Igloczek/cezar/issues/11). Implement after their report and routing contracts are settled.
 
 ## Summary
 
-Give workflow authors a way to configure and inspect the decision graphs introduced by #11 without hand-editing YAML. Keep today's ordered chain builder and `quick-task` behavior intact. The worked example uses real Open Mercato skills: `om-ux-shape` → `om-auto-write-spec` → `om-auto-implement-spec` → a **fork into three simultaneous reviewer steps** (quality, security, UX) → a **wait-for-all join** → a decision using all three reports → human review or bounded rework. The editor exposes skill inputs, runner, typed report fields, ordered conditions, worktree scope, parallel selection, join rule, and failure route before save.
+Give authors **one workflow editor** for a simple sequence, conditional route, loop, or parallel group. A sequence is the simplest graph: each step points to the next. The worked example uses real Open Mercato skills: `om-ux-shape` → `om-auto-write-spec` → `om-auto-implement-spec` → a fork into three reviewer steps → a wait-for-all join → a decision that either proceeds to human review or **repeats implementation once**. The editor makes that return path as easy to add as any other route, while showing its limit and fallback on the canvas.
 
 Open Mercato skills are Markdown playbooks, **not** Cezar workflow definitions. Their prose, PR comments, and `PR:`/`Spec:` lines are not typed routing data. Every agent node must submit an accepted Cezar-owned report from #10; workflow-declared fields are validated before #11 selects an edge. This example is a proposed Cezar workflow assembled from real skills, not an existing Open Mercato YAML file. The original screenshot suggests the three-panel layout and visible validation. Publishing versions, production statistics, and dry-run results are outside this spec.
 
 ## Visual designs
 
-The screens below cover the whole authoring and run flow. They are design proposals with illustrative PR IDs and reports; they do not imply the graph or parallel engine already exists. Editable sources: [library, setup, rules, and validation](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/workflow-screens.html), [full flow and route trace](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-flow.html), [parallel group and waiting state](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/parallel-review.html), [mobile route list](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-mobile.html), and [shared canvas CSS](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/design.css). Desktop images are 1600 px wide; mobile is 430 px wide.
+The screens below cover the whole authoring and run flow. They are design proposals with illustrative PR IDs and reports; they do not imply the graph or parallel engine already exists. Editable sources: [library, agent setup, and validation](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/workflow-screens.html), [editor canvas, selected routes, and route trace](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-flow.html), [reviewer waiting state](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/parallel-review.html), [mobile route list](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-mobile.html), and [shared canvas CSS](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/design.css). Desktop images are 1600 px wide; mobile is 430 px wide.
 
-### 1. Choose a workflow type
+### 1. Create one workflow
 
-The Workflows library keeps Chain workflows and `quick-task` visible. **New workflow** offers Chain or Decision workflow without converting existing files.
+The library has one **New workflow** action. The new workflow starts as a simple sequence; the same editor adds decisions, loops, and parallel branches when needed. Existing workflows and `quick-task` remain visible.
 
-![Workflows library and new workflow choice](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-12-library.png)
+![Unified Workflows library and new workflow dialog](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-12-library.png)
 
 ### 2. See the complete workflow
 
-The canvas shows the actual Open Mercato skills, a bounded rework route, three reviewer branches, their join, and terminal outcomes in one view.
+The canvas shows the actual Open Mercato skills, a clearly directed return arrow for rework, three reviewer branches, their join, and terminal outcomes in one view.
 
 ![Open Mercato feature workflow overview](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-01-overview.png)
 
@@ -30,53 +30,59 @@ The `om-auto-implement-spec` form binds inputs, runner, instructions, required t
 
 ![Implementation skill configuration form](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-13-agent-setup.png)
 
-### 4. Build conditions beyond true or false
+### 4. Make a decision route loop back
 
-The selected decision rule combines a visit limit with an **Any** group across quality, security, and UX reports. Other ordered rules and the required Otherwise route stay visible.
+The user selects the orange return route **on the same editor canvas**. Its inspector combines an **Any** condition across reviewer reports with **Repeat a previous step**, target, maximum repeats, and what happens at the limit. The initial implementation plus one repeat means two visits.
 
-![Nested condition builder](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-14-condition-builder.png)
+![Decision condition and loop controls in the workflow editor](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-02-condition.png)
 
-### 5. Add multiple parallel reviewers
+### 5. Edit a nested condition on the same canvas
 
-A focused view shows **Add reviewer**, separate skills and instructions, one frozen PR head, explicit fan-out to three child runs, and the wait-for-all join. The same skill can be used for distinct reviews.
+Selecting the **Sensitive change** route keeps the full flow visible. Its inspector edits an **All** group containing the risk field and a nested **Any** group for authentication or money changes. Field, operator, value, destination, **Add condition**, and **Add group** are shown in place; the **Reads as** summary explains the resulting rule.
 
-![Three reviewer branches and wait-for-all join](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-08-fanout-config.png)
+![Nested All and Any condition editor beside the workflow canvas](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-16-nested-condition.png)
 
-### 6. Wait for every reviewer
+### 6. Add multiple parallel reviewers
+
+Selecting the parallel group **on that same canvas** shows **Add reviewer**, separate skills and instructions, one frozen PR head, and the wait-for-all join. The same skill can be used for distinct reviews.
+
+![Parallel reviewer group selected in the workflow editor](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-03-parallel.png)
+
+### 7. Wait for every reviewer
 
 Two accepted reports do not advance the run while the third child is running. The join and decision display their pending state.
 
 ![Join waiting for the third reviewer](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-09-join-waiting.png)
 
-### 7. Repair an invalid draft
+### 8. Repair an invalid draft
 
-A separate validation screen focuses unknown report fields, removed reviewer references, and a missing fallback. The draft is retained while Save is blocked.
+A separate validation screen focuses an unknown report field, a repeat route without a limit, and a missing At limit destination. The draft is retained while Save is blocked.
 
 ![Workflow validation and recovery](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-15-validation.png)
 
-### 8. Inspect the route taken
+### 9. Inspect the route taken
 
 The run trace shows the accepted reports, joined result, evaluated rules, and bounded rework route. This is read-only evidence from the persisted run.
 
 ![Workflow run route trace](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-05-trace.png)
 
-### 9. Use the route list on a narrow screen
+### 10. Use the route list on a narrow screen
 
-The mobile view exposes the sequence, each reviewer branch, Add reviewer, join, and decision without requiring drag gestures.
+The mobile view exposes the sequence, each reviewer branch, Add reviewer, join, decision, and repeat route without requiring drag gestures.
 
 ![Mobile workflow route list](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-07-mobile.png)
 
 ## Problem and user outcome
 
-Today `packages/web/src/routes/workflows/workflows.tsx` offers an ordered canvas, skill palette, YAML preview/import/export, and an AI-assisted chain planner. `packages/cezar/src/workflows/types.ts` accepts `steps` or `skills`; a check can retry an earlier step through `onFail`. It does not author arbitrary conditional edges. #11 adds an opt-in graph format so Cezar can route from a validated report instead of agent prose. Without an editor, a user must understand node IDs, report paths, predicates, fallback edges, and visit limits in YAML before they can safely use it.
+Today `packages/web/src/routes/workflows/workflows.tsx` offers an ordered canvas, skill palette, YAML preview/import/export, and an AI-assisted chain planner. `packages/cezar/src/workflows/types.ts` accepts `steps` or `skills`; a check can retry an earlier step through `onFail`. It does not author arbitrary conditional edges. #11 adds graph routing from validated reports. Authors should not have to choose a second workflow type or learn YAML to use conditions, loops, and parallel reviewers.
 
-**Primary job:** A developer can create and save a reusable Open Mercato feature workflow with typed report-driven decisions, an explicit fallback, a bounded rework route, and **multiple independently configured reviewers launched together**. Success means authors can identify every child step, frozen PR head, wait-for-all requirement, decision rule, and failure destination before saving. A plausible project effect is fewer misconfigured runs; the guardrail is no change to existing chain workflow behavior. The need for a visual graph, as opposed to a structured form, is an assumption to validate with a prototype.
+**Primary job:** A developer can start with a sequence and add a report-driven decision, a **visible bounded return route**, and independent reviewers in the same workflow. Success means authors can point to the return target, repeat limit, at-limit destination, every reviewer branch, wait-for-all join, and next decision before saving. A plausible project effect is fewer misconfigured runs; the guardrail is unchanged execution of existing workflow files. The need for a visual canvas, as opposed to a route list alone, is an assumption to validate with a prototype.
 
 ## Dependencies and source of truth
 
 1. **#10 first:** only a validated, persisted report from the Cezar-owned tool is eligible for routing. A transcript marker or displayed tool call is not an accepted report. The UI shows the accepted report's reference and bounded, redacted details only.
-2. **#11 second:** the engine owns graph format, predicate operators, field-path validation, runner eligibility, visit bounds, selected-edge persistence, and recovery. The editor serializes that format. #11 explicitly defers a visual graph editor **and parallel fan-out/joins**. Composite rules and Parallel controls require a later engine/contract extension; the UI must not save them as runnable until that extension exists.
-3. **Existing chains:** `steps` and `skills` files, their `onFail` behavior, and built-in `quick-task` continue to load and run unchanged. No automatic conversion to the new format.
+2. **#11 second:** the engine owns graph format, predicate operators, field-path validation, runner eligibility, visit bounds, selected-edge persistence, and recovery. The editor serializes that format. #11 explicitly defers a visual graph editor **and parallel fan-out/joins**. A direct route-level repeat limit, composite rules, and Parallel controls require the matching later engine/contract support; the UI must not save them as runnable before it exists.
+3. **Existing files:** `steps` and `skills` files, their `onFail` behavior, and built-in `quick-task` continue to load and run unchanged. The one editor renders them as a simple sequence in memory. New workflows save in the unified graph format; an existing file is rewritten only when the user saves an edit, with equivalent route behavior verified before that save.
 4. **API contract:** any new request/response shape lives in `packages/contract` with inferred types. Workflow routes stay chained and versioned under `/api/v1`, use middleware validation, and keep project-scoped route parity.
 
 The #10 report schema does not yet define how an author discovers routable `data` fields and their types. Graph agent nodes therefore declare their expected report fields; accepted data is checked against that declaration before routing. The editor must never suggest arbitrary paths as valid merely because they appeared in one sample report. The concrete contract must be reconciled with #10/#11.
@@ -85,12 +91,12 @@ The #10 report schema does not yet define how an author discovers routable `data
 
 | Decision | Behavior | Reason |
 |---|---|---|
-| Two editors | **Chain** retains the ordered builder; **Decision workflow** opens the graph builder. | Authors can keep simple workflows simple and avoid an implicit format migration. |
+| One editor | **New workflow** opens a sequence in the same canvas that can add checks, decisions, loops, and parallel groups. Existing files open there too. | The user has one workflow concept and one place to extend it. |
 | Explicit routes | Each conditional decision has ordered predicates and one **Otherwise** route. | A visible fallback matches #11's validation requirement and explains what happens when no predicate matches. |
-| Bounded backward routes | An edge to an earlier node displays the per-node visit limit and its exhaustion destination. | A loop cannot be mistaken for an unlimited retry. |
+| First-class repeat route | **Repeat a previous step** draws a directed return arrow and requires **Return to**, **Maximum repeats**, and **At limit**. | The main reason to add decision gates is easy, safe rework without hand-editing a cycle. |
 | Save, no publish | **Save workflow** writes the file after server validation; overwrite requires confirmation. | Matches current file-backed workflow semantics. |
 | Inspect real runs | **View route** shows persisted decisions and report references. | Provides evidence without simulated success counts. |
-| No new AI in authoring | Keep the existing chain planner scoped to chains. Routing uses deterministic predicates. | A generated graph would require a separate quality bar and explicit review. |
+| No new AI in authoring | The existing planner can propose an ordered starting sequence within the unified editor; routing uses deterministic predicates. | A generated graph would require a separate quality bar and explicit review. |
 | Configurable fan-out and wait-for-all join | The author adds reviewer branches to one fork. The example launches quality and security instances of `om-code-review` plus `om-ux-review-pr` from the same frozen PR head, then waits for **all three** reports before deciding. | A reviewer that finishes first cannot advance the workflow. More reviewers use the same pattern, subject to the workspace and dispatch caps. `om-auto-qa-pr` is excluded because it has a review-first gate, and `om-auto-review-pr` can autofix the PR while another reader reviews it. |
 
 ## Actual skill references and worked flow
@@ -110,16 +116,16 @@ flowchart TD
   E --> J
   J --> G{Ordered typed conditions}
   G -- sensitive change --> H[Needs human review]
-  G -- any reviewer requests fixes, visits remain --> C
+  G -- any reviewer requests fixes, repeat available --> C
   G -- all three pass --> I[Ready for human review]
-  G -- exhausted or unresolved --> H
+  G -- repeat exhausted or unresolved --> H
 ```
 
 Every skill node has a Cezar report contract in addition to its skill instructions. A PR number, spec path, verdict, finding count, or risk field in the report is an **agent claim** until a check or human verifies it. The three reviewer nodes must assess the same immutable `headSha`; their child runs never merge changes back into the parent automatically.
 
 ### Full proposed YAML
 
-This is a **target configuration**, not syntax accepted by today's loader. `cezar.graph/v2` and exact key names must be reconciled with #11 and the later composite/fork contracts. The editor should generate the YAML and reject unsupported node kinds at save/start.
+This is a **target configuration**, not syntax accepted by today's loader. `cezar.graph/v2`, the route-level `repeat` block, and exact key names must be reconciled with #11 and the later composite/fork contracts. The editor should generate the YAML and reject unsupported node kinds at save/start. A simple sequence uses the same format with unconditional `next` edges.
 
 ```yaml
 format: cezar.graph/v2 # proposed extension after #11
@@ -148,7 +154,6 @@ nodes:
     kind: agent
     skill: om-auto-implement-spec
     prompt: "Implement the accepted spec; report the implementation PR and exact head."
-    maxVisits: 2
     reportFields:
       prNumber: { type: integer, required: true }
       headSha: { type: git_sha, required: true }
@@ -211,15 +216,14 @@ nodes:
                 - { field: implement.data.touchesAuth, op: eq, value: true }
                 - { field: implement.data.touchesMoney, op: eq, value: true }
         next: needsHuman
-      - label: Any reviewer requests fixes while visits remain
+      - label: Any reviewer requests fixes
         when:
-          all:
-            - { field: implement.visits, op: lt, value: 2 }
-            - any:
-                - { field: qualityReview.data.verdict, op: eq, value: changes }
-                - { field: securityReview.data.verdict, op: eq, value: changes }
-                - { field: uxReview.data.blockingFindings, op: gt, value: 0 }
+          any:
+            - { field: qualityReview.data.verdict, op: eq, value: changes }
+            - { field: securityReview.data.verdict, op: eq, value: changes }
+            - { field: uxReview.data.blockingFindings, op: gt, value: 0 }
         next: implement
+        repeat: { maxRepeats: 1, onLimit: needsHuman }
       - label: All three assessments pass
         when:
           all:
@@ -233,13 +237,19 @@ nodes:
   needsHuman: { kind: end, outcome: blocked }
 ```
 
-The named outcomes and bounds above are design proposals. `specPr`/`prNumber` are scoped to the selected repository; `headSha` must resolve to that PR before the fork. The Cezar-owned report tool, not transcript scraping or `cez task report`, supplies routing fields. `source_read_only` prevents a child's source changes from becoming the parent's result; it does not imply the skill has no outside effects. `om-ux-review-pr` may post a PR comment, so the branch displays that action before launch.
+The named outcomes and bounds above are design proposals. `repeat.maxRepeats: 1` means one return along that route after the initial implementation, so `om-auto-implement-spec` may run twice. The route counter and limit result must persist across restarts; the global `maxTransitions` remains a second safety bound. `specPr`/`prNumber` are scoped to the selected repository; `headSha` must resolve to that PR before the fork. The Cezar-owned report tool, not transcript scraping or `cez task report`, supplies routing fields. `source_read_only` prevents a child's source changes from becoming the parent's result; it does not imply the skill has no outside effects. `om-ux-review-pr` may post a PR comment, so the branch displays that action before launch.
 
 ### Conditions beyond a boolean
 
 The #11 core handles a small declarative predicate set. The **later extension** adds typed numeric comparisons and nested **All** / **Any** groups (proposed cap: depth 3 and 12 leaves per decision). Field choices are restricted to `report.outcome`, declared `report.data` fields, validated check results, and persisted visit counts. The operator menu follows the type: enum/string **is**, **is not**, **is one of**, **is present**; number **=**, **≠**, **>**, **≥**, **<**, **≤**; boolean **is true/false**, **is present**. No regex, JavaScript, arbitrary JSONPath, secret field, free-form expression, or LLM-chosen edge.
 
 Rules run in their visible order and the first match wins; **Otherwise** is mandatory. A required field missing from an accepted report is a protocol failure that stops unresolved. An optional absent field does not satisfy a comparison, including **is not**; only presence can match absence explicitly. **All** and **Any** retain an `unknown` result for absent optional data so a negation cannot turn missing information into success. The UI warns about possible overlapping rules; the engine records each evaluated predicate and selected edge. Server validation rejects undeclared paths, type mismatch, over-deep groups, missing targets, and unsafe operators.
+
+### Loops are a direct route action
+
+From a decision, the author selects **Add route** → **Repeat a previous step**. The editor shows eligible earlier steps in **Return to**; choosing one draws a directed return connector immediately. The inspector requires **Maximum repeats** and **At limit** before Save. In the example, **Return to: om-auto-implement-spec**, **Maximum repeats: 1**, and **At limit: Needs human review** mean one rework attempt after the initial implementation. The canvas labels the connector **Repeat implementation · once**, and the route list describes the same path in text. The author can select the line to edit or remove it without hunting through YAML. Keyboard users can create and select it through the route list.
+
+The repeat count belongs to the **selected route**, not to every visit of its target. A loop is taken only when its condition matches and the counter is below the limit; at the limit, it takes the configured destination atomically. Re-entering implementation creates a new visit and, after its PR head changes, a new three-reviewer fork and join at that head. A restart preserves the count and chosen transition. The server rejects an unbounded backward edge, an unreachable limit destination, a loop with no terminal escape, or a route whose return target was deleted. The global transition cap still stops unexpected cycles with an explicit reason. The UI's **Reads as** preview shows first match, repeated match, and exhausted match before Save.
 
 ### Parallel selection and join semantics
 
@@ -256,47 +266,44 @@ The fork freezes the **required branch set** for that visit and records parent r
 ### 1. Workflow library (`/p/:projectId/workflows`)
 
 - Heading **Workflows**; actions **New workflow** and **Import YAML**; search field **Search workflows**.
-- Each entry shows name, description, **Chain** or **Decision**, **Built in** where applicable, and **Edit**. The built-in `quick-task` cannot be deleted.
+- Each entry shows name, description, a short step summary, **Built in** where applicable, and **Edit**. There is no workflow type badge or type filter. The built-in `quick-task` cannot be deleted.
 - Empty state: **No saved workflows yet. Create a workflow to reuse a sequence of agent steps.** Action: **New workflow**.
 - Loading: **Loading workflows…**. Load error: **Could not load workflows.** Action: **Retry**; show the server detail below without losing local edits.
 - An invalid workflow file remains visible as **Could not load** with its path and parser reason, consistent with the existing workflow catalog's `issues` response; it must not disappear from the library.
 
-### 2. New workflow choice
+### 2. New workflow dialog
 
-**New workflow** opens two choices:
+**New workflow** asks for **Workflow name** and opens the single editor with an empty sequence and **Add agent step**. Copy: **Start with one agent step. Add checks, decisions, loops, or parallel reviewers as needed.** There is no type selection.
 
-- **Chain** — **Run agent and check steps in order.** Opens the current builder.
-- **Decision workflow** — **Choose the next step from a structured report or check result.** Opens the new builder.
+Import parses both the existing `steps`/`skills` files and the unified graph format into the same editor. A legacy file is represented as a sequence with unconditional Next routes. The editor preserves its current execution when opened; saving an edit serializes it to the unified format only after server validation confirms the behavior mapping. A read-only open does not rewrite the file. `quick-task` keeps its built-in behavior.
 
-Import detects the server-parsed format and opens the matching editor. An existing chain is never silently converted. If a user intentionally requests conversion later, that is separate work.
-
-### 3. Decision workflow editor (`/p/:projectId/workflows/:name` for saved workflows)
+### 3. Workflow editor (`/p/:projectId/workflows/:name` for saved workflows)
 
 At desktop width, use three regions: a left step palette, a central connected flow, and a right inspector. At narrow widths, the palette and inspector open as labeled sheets; the flow has an always-available **Route list** that presents the same connections in reading order. Reuse the existing `Button`, `Input`, `Textarea`, `AlertDialog`, and loading/error primitives. Preserve the established project scope and route patterns.
 
 **Header:** editable workflow name, **Unsaved changes** or **Saved**, **Export YAML**, **Save workflow**. An unsaved navigation attempt asks **Discard unsaved changes?** with **Keep editing** and **Discard changes**.
 
-**Palette:** searchable **Add a step** list with **Agent step**, **Check**, **Decision**, **End**, and, only when the engine supports it, **Parallel group** and **Join**. Installed Open Mercato skills appear by their real names in the Agent step picker. An explicit **Add next step** action on each node supports keyboard and touch use; pointer dragging is optional.
+**Palette:** searchable **Add a step** list with **Agent step**, **Check**, **Decision**, **End**, and, when the engine supports them, **Repeat route**, **Parallel group**, and **Join**. **Repeat route** focuses the selected decision's **Add route → Repeat a previous step** action. Installed Open Mercato skills appear by their real names in the Agent step picker. An explicit **Add next step** action on each node supports keyboard and touch use; pointer dragging is optional.
 
-**Canvas:** each node card shows a type, name, concise configuration summary, and an error count when invalid. Each connection shows its condition or **Otherwise**; backward routes show **Repeat · at most N visits**. Selection opens the relevant inspector. The selected route is also described in text, so color and line shape never carry meaning alone. Canvas zoom/pan must retain keyboard access to every node and route. A simple ordered **Route list** is required even if a visual canvas library is used.
+**Canvas:** each node card shows a type, name, concise configuration summary, and an error count when invalid. Each connection shows its condition or **Otherwise**. A return route has an arrow pointing into its target and a label such as **Repeat implementation · once**. Clicking the line or its route-list entry opens the same inspector. The selected route is also described in text, so color and line shape never carry meaning alone. Canvas zoom/pan must retain keyboard access to every node and route. A simple ordered **Route list** is required even if a visual canvas library is used.
 
 **Agent inspector:** **Step name**, **Skill**, **Runner**, **Instructions**, **Input bindings**, and a **Report fields** table with field name, type, required/optional, and allowed enum values. **Report required** is fixed for graph agent nodes, with the text **This step must submit a structured report before Cezar chooses a route.** Unsupported runners are disabled with **This runner cannot submit workflow reports. Choose a supported runner.** An absent selected skill shows **This skill is not installed here. Choose another skill or install it before saving.** The editor cannot infer report fields from a skill's prose.
 
 **Check inspector:** **Step name** and **Command**. Check routing offers only results allowed by the final #11 contract. The UI must not imply that arbitrary command output is a validated report field.
 
-**Decision/route inspector:** ordered rule cards. Each card has **Match all / Match any**, **Add condition**, **Add group**, typed **Report field**, **Operator**, **Value**, and **Next step**, plus a plain-language **Reads as** summary. Start with #11's operators; show numeric and nested-group controls only when the later contract exists. Final row: **Otherwise → [step]**. A route with no fallback is blocking. For a backward route, show **Maximum visits**, **When exhausted**, and the destination. The field picker uses declared reports, not arbitrary paths. No free-form expression editor.
+**Decision/route inspector:** ordered rule cards. Each has **Match all / Match any**, **Add condition**, **Add group**, typed **Report field**, **Operator**, **Value**, and **Next step**, plus a plain-language **Reads as** summary. **Add route → Repeat a previous step** opens **Return to**, **Maximum repeats**, and **At limit** in that same inspector and draws the return arrow as soon as a target is chosen. Start with #11's operators; show numeric and nested-group controls only when the later contract exists. Final row: **Otherwise → [step]**. A route with no fallback is blocking. The field picker uses declared reports, not arbitrary paths. No free-form expression editor.
 
 **Parallel group inspector:** **Reviewer branches** lists each stable branch ID, editable label, skill, instructions/focus, runner, input, frozen PR head, read-only worktree scope, external actions, and expected report. **Add reviewer** adds another lane and join connection; **Remove reviewer** asks for confirmation if a decision references that branch. The header says **All 3 reviewer reports required** and updates as branches change. **Join policy: Wait for all** and **Maximum concurrent children** sit below. Explain queued branches and worktree isolation. **When a branch cannot finish** names an explicit route. If the engine lacks fork/join, the control explains **Requires a newer workflow engine** and cannot be saved as runnable.
 
 **End inspector:** **Outcome** with **Complete**, **Needs review**, or **Fail**, only where those outcomes map to #11's actual terminal states. Do not promise a new lifecycle state from UI copy alone.
 
-**Problems to fix:** persistent list of server-authoritative validation errors, each focusing the node or route. Examples: **“Review gate” has no Otherwise route. Add one before saving.**; **The route back to “Implement” needs a visit limit.**; **All reviewer branches must use the same PR head.**; **The decision still references a removed reviewer. Update its rule.**; **No terminal path is reachable from “Start”.** A warning that is not blocking must say so explicitly. Do not display invented run counts or a “safe to publish” claim.
+**Problems to fix:** persistent list of server-authoritative validation errors, each focusing the node or route. Examples: **“Review gate” has no Otherwise route. Add one before saving.**; **The repeat route to “Implement” needs Maximum repeats and At limit.**; **All reviewer branches must use the same PR head.**; **The decision still references a removed reviewer. Update its rule.**; **No terminal path is reachable from “Start”.** A warning that is not blocking must say so explicitly. Do not display invented run counts or a “safe to publish” claim.
 
 **Save:** submit through the versioned workflow route using the #11 graph schema. Validate client-side for timely feedback, then trust the server result. Keep the draft in memory on request failure. Show **Workflow wasn’t saved: [server reason]. Fix the highlighted item and try again.** Existing-file collision retains the current overwrite confirmation; its cancel action leaves the draft intact. After save, show **Saved workflow** and make the file available in the task workflow picker. Saving a changed definition must not mutate a running task's persisted definition; confirm this engine assumption during implementation.
 
 ### 4. Run route trace
 
-From a run created with a decision workflow, **View route** opens a read-only ordered trace. For each visit show node name, attempt, accepted report reference or check result, predicates considered, selected edge, and visit count. A parallel group shows its frozen PR head, child run links and statuses, join result, and stale/unresolved reason. A route to a prior node includes the remaining limit or exhaustion reason. Link to existing run details. Redact secrets and cap displayed report data as #10 requires.
+From any workflow run, **View route** opens a read-only ordered trace. For each visit show node name, attempt, accepted report reference or check result, predicates considered, selected edge, and visit count. A parallel group shows its frozen PR head, child run links and statuses, join result, and stale/unresolved reason. A repeat route shows **repeat 1 of 1**, its target, and the limit destination; an exhausted repeat shows why it took the limit destination. Link to existing run details. Redact secrets and cap displayed report data as #10 requires.
 
 Missing or rejected report: **No accepted report was received for this attempt. Routing stopped.** Action **Open run**. A blocked report that has no matching or fallback route shows the recorded unresolved reason. Canceled runs and human review keep their authoritative status. Never reconstruct route decisions from final prose.
 
@@ -304,7 +311,7 @@ Missing or rejected report: **No accepted report was received for this attempt. 
 
 | State | What the user sees | Recovery |
 |---|---|---|
-| Empty decision draft | **Add an agent step to start this workflow.** | **Add agent step** |
+| Empty workflow | **Add an agent step to start this workflow.** | **Add agent step** |
 | Partial graph | Node and route errors in **Problems to fix**; **Save workflow** disabled until valid. | Focus each error and edit it. |
 | Unknown report field or type | **This report field is not available for routing. Choose a validated field.** | Choose a field or revise the reporting contract. |
 | Unsupported runner | **This runner cannot submit workflow reports. Choose a supported runner.** | Select a supported runner. |
@@ -316,38 +323,40 @@ Missing or rejected report: **No accepted report was received for this attempt. 
 | Parallel capacity full | **1 of 3 reviewers is queued for an available slot. The join is waiting for all 3.** | Inspect queue; no hidden extra process is started. |
 | Child failed or never reported | **Code review stopped before submitting a report. The join did not continue.** | **Open child run**; follow an explicit unresolved route or stop. |
 | PR changes after fork | **The PR changed while reviews were running. Review the new head before continuing.** | Rerun all required reviewer branches on a new frozen head. |
+| Incomplete repeat route | **Set Maximum repeats and At limit for the route back to Implement.** | Select the orange route and complete both fields. |
+| Return target removed | **The repeat route points to a removed step. Choose a new target or remove the route.** | Reconnect through the route inspector. |
 | Loop limit exhausted | **The rework limit was reached. This workflow needs human review.** | Open run and route to the configured human/blocked terminal. |
 
 Keyboard users must be able to add, select, reorder where meaningful, connect, edit, and remove nodes without drag gestures. Visible focus, readable route labels, and non-color status cues are required. Confirm accessible graph interaction with a prototype before choosing a canvas library.
 
 ## Engineering boundaries
 
-- Extend the workflow definition/contract only with the final #11 versioned graph format; do not widen the legacy schema to treat graph data as an ordered chain. `packages/cezar/src/workflows/types.ts`, `packages/contract/src/workflows.ts`, loader, save/parse routes, run persistence, and client need the same discriminant and bounds.
+- Use the final #11 versioned graph format for newly saved workflows. The one editor adapts existing `steps`/`skills` files into an in-memory sequence and validates equivalent routes before a user-initiated save writes the unified format. Do not widen the legacy schema to treat graph data as an ordered chain. `packages/cezar/src/workflows/types.ts`, `packages/contract/src/workflows.ts`, loader, save/parse routes, run persistence, and client need the same discriminant and bounds.
 - Keep workflow response parity and typed-body coverage. A project-scoped route needs its boot alias. Route validation belongs in middleware. Catalog load failures remain nonfatal.
-- The current builder's eight-step cap applies to current chains. Graph limits must come from #11's documented node and visit bounds; do not reuse eight without a reason.
+- The current builder's eight-step cap applies to existing ordered files. The unified editor's graph limits must come from the final engine contract; do not reuse eight without a reason.
 - Preserve file-based workflows under `.ai/cezar/workflows/`; no required config, background process, network request, or environment variable.
 - Route-history UI reads persisted #11 transitions. It must show exactly what the engine recorded after crash recovery; no client-side predicate replay.
-- Composite predicates and fork/join require a **separate engine and contract extension after #11**. The UI must gate these node kinds by actual engine capability at load, save, and start. The YAML example above cannot run on #11 alone.
+- The route-level repeat contract, composite predicates, and fork/join require matching engine and contract support after #11. The one editor must gate unsupported controls at load, save, and start. The YAML example above cannot run on #11 alone.
 - A fork uses durable child identities and #10 report references. Existing `cez task report` summaries do not satisfy a join. Children fork the same committed ref; no parallel edit to one worktree and no automatic merge.
-- Do not change `CEZ:DONE`, `CEZ:ASK`, `CEZ:MONITORING`, or `onFail` behavior for legacy workflows. In the new graph format, final-report completion follows #11.
+- Do not change `CEZ:DONE`, `CEZ:ASK`, `CEZ:MONITORING`, or `onFail` behavior for existing workflow files. A save-time adaptation test must prove the same next step, failure route, terminal status, and retry bound before rewriting one. In the unified graph format, final-report completion follows #11.
 
 ## Delivery and acceptance
 
-1. With #10 and #11 implemented, a user can create a decision workflow containing an agent report condition, an **Otherwise** path, a bounded backward route, and a reachable terminal node through the UI; saving writes valid graph YAML and the workflow appears in the task picker.
+1. A user creates **one Workflow** with no type selection. A simple sequence, a report-driven decision, a bounded repeat route, and a parallel group are authored in the same editor as their engine capabilities become available. A saved workflow appears in the same task picker.
 2. Given invalid edges, unknown targets or fields, missing fallback, unbounded cycle, unsupported runner, or unreachable terminal path, the UI identifies the offending control, and server save/start validation rejects the graph without discarding the draft.
-3. Given a legacy `steps` or `skills` workflow, opening, editing, importing, exporting, saving, and running it retain current behavior. `quick-task` is unchanged. No automatic conversion occurs.
-4. Given a completed graph run, **View route** shows the persisted accepted report reference, conditions considered, chosen edge, visit counts, and stop reason. A refresh or restart yields the same trace.
-5. Given missing or invalid report and exhausted nudge attempts, the trace shows an unresolved stop, never a success edge. Cancel and human review still take precedence.
-6. Keyboard and touch users can complete the example graph without pointer drag. The route list exposes all conditions and limits in text.
-7. Once the later extension exists, a user can add three parallel reviewer branches, including two distinct instances of `om-code-review` and one `om-ux-review-pr`, configure **Wait for all**, and author an **All** group containing an **Any** group and numeric comparison. Saving rejects unsupported combinations and dangling references after branch removal; a run records all three accepted child reports and one durable join result.
+3. Given an existing `steps` or `skills` file, opening it shows its steps in the one editor and does not rewrite it. Saving an edit converts it to the unified format only after validation proves equivalent next steps, `onFail` behavior, and terminal result; if that proof fails, Save is blocked and the original file remains intact. `quick-task` is unchanged.
+4. A user can select **Repeat a previous step** from a decision, choose the target in the route inspector, set **Maximum repeats: 1** and **At limit: Needs human review**, and see the arrow and label on the canvas and route list. The initial implementation plus one repeat yields exactly two visits; a later matching report takes At limit. A refresh or restart preserves the repeat counter and chosen transition.
+5. Given a completed run, **View route** shows persisted accepted reports, conditions considered, selected edges, repeat count, and stop reason. Given missing or invalid report and exhausted nudge attempts, the trace shows an unresolved stop, never a success edge. Refresh or restart yields the same trace; cancel and human review still take precedence.
+6. Keyboard and touch users can complete the example without pointer drag. The route list exposes every condition, loop direction, repeat count, and limit destination in text.
+7. Once the later extension exists, a user can add three parallel reviewer branches, including two distinct instances of `om-code-review` and one `om-ux-review-pr`, configure **Wait for all**, and author nested **All/Any** groups and numeric comparison. Saving rejects unsupported combinations and dangling references after branch removal; a run records all three accepted child reports and one durable join result.
 8. Given only two of three accepted reports, the decision remains unevaluated even if one of those reports requests changes. After the third child settles, the join evaluates exactly once from the frozen required set. Given any child missing a report, failing, or reviewing a stale PR head, the join never takes its success edge. A restart before or after child launch or edge selection cannot duplicate work or change the chosen result.
 
-**Delivery sequence:** (A) #11-compatible simple editor and trace; (B) bounded composite predicate AST plus field declarations; (C) durable fork/join execution over isolated children; (D) parallel authoring and run-history UI. Each step must leave legacy chains working. The later UI is enabled only with its matching engine support. The implementation agent should test the example flow end to end with mock agents that submit real accepted reports, including multiple child settlement orders, 2/3 waiting, one reviewer requesting changes before the third finishes, an unresolved child, a stale head, capacity queueing, and crash recovery.
+**Delivery sequence:** (A) one editor for sequences and #11-compatible decisions with legacy-file adaptation and route trace; (B) first-class bounded repeat routes plus composite predicates and declared fields; (C) durable fork/join execution over isolated children; (D) parallel authoring and run-history UI. Each step must leave existing files working. Later controls are enabled only with matching engine support. The implementation agent should test the example end to end with mock agents that submit real accepted reports, including first and exhausted repeats, multiple child settlement orders, 2/3 waiting, one reviewer requesting changes before the third finishes, an unresolved child, a stale head, capacity queueing, and crash recovery.
 
 Verification: meaningful route/UI tests for save validation, branch/fallback/loop authoring, import of both formats, unsaved-change recovery, unsupported runner, and persisted run trace; server contract parity, route parity, typed bodies, and legacy-workflow regression tests. Run the repository's required typecheck, test, build, and package checks for the implementation PR.
 
 ## Decision-changing test and open dependency
 
-Prototype one branch plus one bounded retry with the canvas and route list. Ask developers to create it and explain the fallback and maximum visits without coaching. If they cannot, simplify the inspector and route list before building the canvas. This is a proposed test, not completed research.
+Prototype a sequence that adds a decision and one return route. Ask developers to create **Repeat implementation once**, identify the arrow's direction, and explain what happens after the second request for fixes without coaching. If they cannot, simplify the route action and inspector before building the canvas. This is a proposed test, not completed research.
 
 The final #10/#11 contracts must settle discoverable report-field paths/types, terminal outcome names, graph size limits, and the run-history response before UI implementation. The editor must follow those contracts rather than define a second routing model.
