@@ -14,7 +14,7 @@ routing or change completion behavior; issue #11 owns that later step.
   summary, bounded JSON data and evidence references. Data is a flat map of
   scalars, lists of at most 32 scalars, or one-level scalar maps. Limits apply
   before persistence, including list length and 8192-byte total size. Secret redaction
-  runs before anything reaches disk or the browser.
+  runs before anything reaches disk or the run API.
 - Cezar grants a random capability for each agent invocation. A local MCP server
   passes the capability to a process-owned Unix socket; the caller cannot supply
   a run ID, step ID or attempt. The parent validates the capability against its
@@ -26,7 +26,8 @@ routing or change completion behavior; issue #11 owns that later step.
   A second digest of the validated, unredacted submission distinguishes
   conflicting calls whose secret values redact to the same display text.
 - The accepted report belongs to the run record and appears in its versioned
-  API representation and task detail. A restart reads it from `runs.json`.
+  API representation for later Cezar workflow routing. It is not rendered in
+  the task cockpit. A restart reads it from `runs.json`.
 - The capability is never written to a run record, event, log, or error message.
   Session teardown invalidates it. Resume creates a new capability and attempt.
 
@@ -46,5 +47,5 @@ are never accepted as a report.
 3. Inject the MCP configuration at both runner construction paths for Claude,
    Codex and OpenCode. Test the generated wire configurations and a real MCP
    invocation through a mock backend. Document every selectable runner.
-4. Show accepted reports in task history, update `AGENT_PROTOCOL.md` and
+4. Keep accepted reports in run history without a task-view panel, update `AGENT_PROTOCOL.md` and
    `BACKWARD_COMPATIBILITY.md`, and verify the default workflow path still works.
