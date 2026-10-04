@@ -184,6 +184,41 @@ from an authoritative v1/v2 authentication error, persists a provider id, opaque
 incident id, and optional `stepId`, and the cockpit renders recovery guidance. It
 does not change backend parity or expose the raw error.
 
+### Structured in-task report tool (issue #10)
+
+`report_task_result` is a Cezar-owned MCP tool, separate from v1/v2 tool-call
+display events. A displayed call is not an accepted report. The local MCP bridge
+submits to a Unix socket owned by the current `RunManager` with a random
+per-invocation capability inherited only by its runner process. The caller
+does not name a run, step or attempt; the owning process binds those facts and
+persists the validated result before acknowledging the tool call. This works
+without a cockpit HTTP server in headless `cezar run`.
+
+Payload version 1 contains `schemaVersion: 1`, `idempotencyKey`, an `outcome`
+(`completed`, `blocked`, `failed`, `inconclusive`), `summary`, bounded `data`
+and `evidence` references. Reports are agent claims. They do not settle the
+run or change workflow order, `onFail`, or marker behavior. Exact retries in
+the same active attempt return the stored record; a conflicting second report,
+stale capability or settled run fails. The idempotency key is stored as a SHA-256
+digest. `GET /api/v1/runs/:id` and project-scoped aliases expose accepted reports
+on the run record.
+The accepted record also carries a digest of the validated original payload so
+a conflicting retry is rejected even when two secret values redact identically.
+
+| Runner | Report tool in Cezar task sessions |
+| --- | --- |
+| Claude Code | Supported through per-session `--mcp-config`. |
+| Codex | Supported through per-process `mcp_servers.cezar` app-server config. |
+| OpenCode | Supported through merged inline MCP config. |
+| Cursor | Unsupported; no Cezar-owned tool registration in this adapter. |
+| pi | Unsupported; no Cezar-owned tool registration in this adapter. |
+| Junie | Unsupported; no Cezar-owned tool registration in this adapter. |
+| Copilot | Unsupported; no Cezar-owned tool registration in this adapter. |
+
+New and resumed sessions use the same binding path. An unsupported runner may
+still print text or show ordinary tool events; neither is a report.
+
+
 ---
 
 ## 3. v2 `UiEvent` — the normalized protocol (`packages/cezar/src/core/ui-events.ts`)

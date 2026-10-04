@@ -118,6 +118,14 @@ Breaking: removing/renaming a route; making a previously optional body field req
 
 ## 3. `.ai/cezar/` state files (`packages/cezar/src/runs/store.ts` and friends)
 
+`RunRecord.taskReports` is optional and absent from older `runs.json` records.
+It stores bounded, validated version-1 agent claims with run, step and attempt
+identity. The existing versioned `GET /runs/:id` representation exposes this
+optional field; no route spelling or legacy marker semantics change. The
+per-session capability and Unix socket path remain process-local and never
+enter the state file. Future report versions must be added compatibly; an
+unknown report field must not invalidate the entire run index.
+
 Written by one version, read by the next, and hand-editable by design:
 
 - **`tracker.json`** — optional, non-secret project association (provider, source, scope and connection

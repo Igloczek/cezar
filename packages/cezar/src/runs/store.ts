@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -13,7 +13,7 @@ import { MAX_REF } from './task-refs.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 // A contract VALUE, like `workspaceUiStateSchema` in `workspace/migrations.ts`: the persisted
 // `dispatch` object and its wire half are literally the same schema, so they cannot drift.
-import { dispatchSchema, trackerAssociationSchema, trackerAutomationEventSchema } from '@open-mercato/cezar-contract';
+import { acceptedTaskReportSchema, dispatchSchema, taskReportPayloadSchema, trackerAssociationSchema, trackerAutomationEventSchema, type AcceptedTaskReport, type TaskReportPayload } from '@open-mercato/cezar-contract';
 
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 
@@ -370,6 +370,8 @@ export const runRecordSchema = z.object({
    *  `workflowStepSchema` only with that in mind: a narrowing here silently eats
    *  queued runs rather than degrading them. */
   workflowDef: workflowDefSchema.optional().catch(undefined),
+  /** Validated claims submitted by the current agent attempt through the owner-bound tool. */
+  taskReports: z.array(acceptedTaskReportSchema).max(128).optional().catch(undefined),
 });
 
 export type StepState = z.infer<typeof stepStateSchema>;
@@ -847,6 +849,57 @@ export class RunStore extends EventEmitter {
 
   getRun(id: string): RunRecord | undefined {
     return this.runs.get(id);
+  }
+
+  /** Commit before acknowledging the tool call. A failed index write rolls back in memory. */
+  acceptTaskReport(runId: string, stepId: string, attempt: number, input: unknown): AcceptedTaskReport {
+    const run = this.runs.get(runId);
+    if (!run || run.status !== 'running' || run.currentStepId !== stepId) {
+      throw new Error('This task session is no longer active. Resume the task before reporting.');
+    }
+    const step = run.steps.find((entry) => entry.id === stepId);
+    if (!step || step.status !== 'running' || step.iterations !== attempt) {
+      throw new Error('This report capability belongs to a stale step attempt.');
+    }
+    const parsed = taskReportPayloadSchema.parse(input);
+    if (Buffer.byteLength(JSON.stringify(parsed), 'utf8') > 8192) {
+      throw new Error('Report exceeds 8192 bytes. Shorten data or evidence.');
+    }
+    if (process.env.CEZ_REDACT_SECRETS !== '0') {
+      // Unlike event objects, report data keys are agent supplied. Reject a
+      // key that would be redacted so it cannot leak through runs.json or API.
+      const hasSecretKey = (value: unknown): boolean => value !== null && typeof value === 'object'
+        && Object.entries(value).some(([key, child]) => this.redactText(key, runId) !== key || hasSecretKey(child));
+      if (hasSecretKey(parsed.data)) throw new Error('Report data contains a secret-bearing key. Use a neutral field name.');
+    }
+    const payloadHash = createHash('sha256').update(JSON.stringify(parsed)).digest('hex');
+    const payload = taskReportPayloadSchema.parse({
+      ...parsed,
+      // Idempotency keys are opaque. Persist their digest so a token-shaped key
+      // cannot become a credential leak in runs.json or the run API.
+      idempotencyKey: createHash('sha256').update(parsed.idempotencyKey).digest('hex'),
+      summary: this.redactText(parsed.summary, runId),
+      data: process.env.CEZ_REDACT_SECRETS === '0' ? parsed.data : redactDeep(parsed.data, this.secretsForRun(runId)),
+      evidence: process.env.CEZ_REDACT_SECRETS === '0' ? parsed.evidence : redactDeep(parsed.evidence, this.secretsForRun(runId)),
+    });
+    const existing = run.taskReports?.find((report) => report.stepId === stepId && report.attempt === attempt);
+    if (existing) {
+      if (existing.payload.idempotencyKey === payload.idempotencyKey && existing.payloadHash === payloadHash) return existing;
+      throw new Error('A different report was already accepted for this step attempt.');
+    }
+    if ((run.taskReports?.length ?? 0) >= 128) throw new Error('This run reached its report limit.');
+    const accepted: AcceptedTaskReport = { runId, stepId, attempt, acceptedAt: new Date().toISOString(), payloadHash, payload };
+    const previous = run.taskReports;
+    run.taskReports = [...(previous ?? []), accepted];
+    try {
+      this.flush({ throwOnError: true });
+    } catch {
+      run.taskReports = previous;
+      this.scheduleSave();
+      throw new Error('The report could not be saved. Retry the same submission.');
+    }
+    this.touch(run);
+    return accepted;
   }
 
   createRun(input: {
