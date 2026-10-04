@@ -10,7 +10,7 @@ Open Mercato skills are Markdown playbooks, **not** Cezar workflow definitions. 
 
 ## Visual designs
 
-The screens below cover the whole authoring and run flow. They are design proposals with illustrative PR IDs and reports; they do not imply the graph or parallel engine already exists. Editable sources: [library, agent setup, and validation](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/workflow-screens.html), [editor canvas, selected routes, and route trace](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-flow.html), [reviewer waiting state](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/parallel-review.html), [mobile route list](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-mobile.html), and [shared canvas CSS](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/design.css). Desktop images are 1600 px wide; mobile is 430 px wide.
+The screens below cover the whole authoring and run flow. They are design proposals with illustrative PR IDs and reports; they do not imply the graph or parallel engine already exists. Editable sources: [library and agent setup](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/workflow-screens.html), [editor canvas, route controls, run states, validation, and route trace](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-flow.html), [mobile route list](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-mobile.html), and [shared canvas CSS](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/design.css). Desktop images are 1600 px wide; mobile is 430 px wide.
 
 ### 1. Create one workflow
 
@@ -50,19 +50,19 @@ Selecting the parallel group **on that same canvas** shows **Add reviewer**, sep
 
 ### 7. Wait for every reviewer
 
-Two accepted reports do not advance the run while the third child is running. The join and decision display their pending state.
+The same workflow canvas enters a read-only run state. Quality and UX have accepted reports, Security is still running, the join shows **2 of 3**, and the decision stays locked. The inspector lists each child run and the frozen PR head.
 
 ![Join waiting for the third reviewer](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-09-join-waiting.png)
 
 ### 8. Repair an invalid draft
 
-A separate validation screen focuses an unknown report field, a repeat route without a limit, and a missing At limit destination. The draft is retained while Save is blocked.
+The same editor canvas highlights the invalid route and lists three blocking problems: an unknown report field, a repeat route without a limit, and a missing At limit destination. The draft is retained while **Save workflow** is disabled.
 
 ![Workflow validation and recovery](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-15-validation.png)
 
 ### 9. Inspect the route taken
 
-The run trace shows the accepted reports, joined result, evaluated rules, and bounded rework route. This is read-only evidence from the persisted run.
+The same canvas shows a read-only run trace: all three accepted reviewer reports, the completed join, the selected decision, and the highlighted return route. The inspector explains each evaluated rule and **repeat 1 of 1** from persisted run data.
 
 ![Workflow run route trace](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-05-trace.png)
 
@@ -297,13 +297,13 @@ At desktop width, use three regions: a left step palette, a central connected fl
 
 **End inspector:** **Outcome** with **Complete**, **Needs review**, or **Fail**, only where those outcomes map to #11's actual terminal states. Do not promise a new lifecycle state from UI copy alone.
 
-**Problems to fix:** persistent list of server-authoritative validation errors, each focusing the node or route. Examples: **“Review gate” has no Otherwise route. Add one before saving.**; **The repeat route to “Implement” needs Maximum repeats and At limit.**; **All reviewer branches must use the same PR head.**; **The decision still references a removed reviewer. Update its rule.**; **No terminal path is reachable from “Start”.** A warning that is not blocking must say so explicitly. Do not display invented run counts or a “safe to publish” claim.
+**Problems to fix:** a persistent strip beneath the same canvas lists server-authoritative validation errors, each focusing the node or route and its inspector control. Examples: **“Review gate” has no Otherwise route. Add one before saving.**; **The repeat route to “Implement” needs Maximum repeats and At limit.**; **All reviewer branches must use the same PR head.**; **The decision still references a removed reviewer. Update its rule.**; **No terminal path is reachable from “Start”.** A warning that is not blocking must say so explicitly. Do not display invented run counts or a “safe to publish” claim.
 
 **Save:** submit through the versioned workflow route using the #11 graph schema. Validate client-side for timely feedback, then trust the server result. Keep the draft in memory on request failure. Show **Workflow wasn’t saved: [server reason]. Fix the highlighted item and try again.** Existing-file collision retains the current overwrite confirmation; its cancel action leaves the draft intact. After save, show **Saved workflow** and make the file available in the task workflow picker. Saving a changed definition must not mutate a running task's persisted definition; confirm this engine assumption during implementation.
 
 ### 4. Run route trace
 
-From any workflow run, **View route** opens a read-only ordered trace. For each visit show node name, attempt, accepted report reference or check result, predicates considered, selected edge, and visit count. A parallel group shows its frozen PR head, child run links and statuses, join result, and stale/unresolved reason. A repeat route shows **repeat 1 of 1**, its target, and the limit destination; an exhausted repeat shows why it took the limit destination. Link to existing run details. Redact secrets and cap displayed report data as #10 requires.
+From any workflow run, **View route** reuses the workflow canvas in read-only run mode: the same node positions, branches, join, and return arrow stay visible, while the left rail becomes **Run steps** and the right inspector shows the selected node or route evidence. For each visit show node name, attempt, accepted report reference or check result, predicates considered, selected edge, and visit count. A parallel group shows its frozen PR head, child run links and statuses, join result, and stale/unresolved reason. A repeat route shows **repeat 1 of 1**, its target, and the limit destination; an exhausted repeat shows why it took the limit destination. Link to existing run details. Redact secrets and cap displayed report data as #10 requires.
 
 Missing or rejected report: **No accepted report was received for this attempt. Routing stopped.** Action **Open run**. A blocked report that has no matching or fallback route shows the recorded unresolved reason. Canceled runs and human review keep their authoritative status. Never reconstruct route decisions from final prose.
 
