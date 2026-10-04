@@ -10,58 +10,61 @@ Open Mercato skills are Markdown playbooks, **not** Cezar workflow definitions. 
 
 ## Visual designs
 
-These are proposed screens with illustrative PR IDs and accepted reports. The actual Open Mercato skill names and order are sourced below; the composite and Parallel controls require the engine extension described below. Editable sources: [full-flow HTML](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-flow.html), [parallel-review HTML](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/parallel-review.html), [desktop CSS](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/design.css), and [mobile HTML](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-mobile.html). Full-flow images are 1600 × 1160, reviewer-detail images are 1600 × 1080, and mobile images are 430 × 932.
+The screens below cover the whole authoring and run flow. They are design proposals with illustrative PR IDs and reports; they do not imply the graph or parallel engine already exists. Editable sources: [library, setup, rules, and validation](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/workflow-screens.html), [full flow and route trace](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-flow.html), [parallel group and waiting state](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/parallel-review.html), [mobile route list](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-mobile.html), and [shared canvas CSS](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/design.css). Desktop images are 1600 px wide; mobile is 430 px wide.
 
-**Fan-out configuration —** one implementation result launches three independent reviewer runs from the same frozen PR head. The author can add another reviewer; all selected branches converge on one join before the decision.
+### 1. Choose a workflow type
 
-![Three parallel reviewers and wait-for-all join](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-08-fanout-config.png)
+The Workflows library keeps Chain workflows and `quick-task` visible. **New workflow** offers Chain or Decision workflow without converting existing files.
 
-**Waiting state —** two of three reviewers have reported. The join remains pending and the decision cannot run.
+![Workflows library and new workflow choice](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-12-library.png)
+
+### 2. See the complete workflow
+
+The canvas shows the actual Open Mercato skills, a bounded rework route, three reviewer branches, their join, and terminal outcomes in one view.
+
+![Open Mercato feature workflow overview](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-01-overview.png)
+
+### 3. Configure an agent step
+
+The `om-auto-implement-spec` form binds inputs, runner, instructions, required typed report fields, next step, and failure behavior.
+
+![Implementation skill configuration form](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-13-agent-setup.png)
+
+### 4. Build conditions beyond true or false
+
+The selected decision rule combines a visit limit with an **Any** group across quality, security, and UX reports. Other ordered rules and the required Otherwise route stay visible.
+
+![Nested condition builder](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-14-condition-builder.png)
+
+### 5. Add multiple parallel reviewers
+
+A focused view shows **Add reviewer**, separate skills and instructions, one frozen PR head, explicit fan-out to three child runs, and the wait-for-all join. The same skill can be used for distinct reviews.
+
+![Three reviewer branches and wait-for-all join](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-08-fanout-config.png)
+
+### 6. Wait for every reviewer
+
+Two accepted reports do not advance the run while the third child is running. The join and decision display their pending state.
 
 ![Join waiting for the third reviewer](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-09-join-waiting.png)
 
-**Joined decision —** all three reports were accepted for one PR head. Security requested changes, so the workflow returns to implementation within its visit limit.
+### 7. Repair an invalid draft
 
-![All reviewer reports joined before rework decision](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-10-join-decision.png)
+A separate validation screen focuses unknown report fields, removed reviewer references, and a missing fallback. The draft is retained while Save is blocked.
 
-These three close-up views focus on review aggregation. The full gate also evaluates the higher-priority sensitive-change rule shown below.
+![Workflow validation and recovery](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-15-validation.png)
 
-**Full feature flow —** real skills, three independent review branches, a wait-for-all join, ordered decision, bounded rework, and human terminal outcomes.
+### 8. Inspect the route taken
 
-![Open Mercato skill workflow overview](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-01-overview.png)
+The run trace shows the accepted reports, joined result, evaluated rules, and bounded rework route. This is read-only evidence from the persisted run.
 
-<details>
-<summary>Agent setup, conditions, parallel configuration, recovery, route history, and mobile layout</summary>
+![Workflow run route trace](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-05-trace.png)
 
-**Agent inspector —** the real `om-auto-implement-spec` skill, runner, bound spec inputs, required report fields, and failure/rework policy.
+### 9. Use the route list on a narrow screen
 
-![Implementation skill configuration](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-06-agent.png)
+The mobile view exposes the sequence, each reviewer branch, Add reviewer, join, and decision without requiring drag gestures.
 
-**Composite rule editor —** nested All/Any groups, enum, boolean, numeric comparison, ordered rules, and Otherwise.
-
-![Nested condition builder](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-02-condition.png)
-
-**Parallel group inspector —** all three reviewer steps, their skills and instructions, frozen input, separate source worktrees, expected reports, join policy, and failure routes.
-
-![Parallel review configuration](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-03-parallel.png)
-
-**Unresolved join —** two children have valid reports, the third does not; routing stops or takes the configured human route.
-
-![Unresolved parallel join](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-04-unresolved.png)
-
-**Run route trace —** all three child reports and the ordered predicate outcomes explain the bounded rework decision.
-
-![Open Mercato workflow route trace](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-05-trace.png)
-
-**Narrow layout —** the route list shows all three reviewer lanes and their join; the selected node's inspector opens as a sheet.
-
-![Mobile route list and decision sheet](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-07-mobile.png)
-
-**Mobile decision sheet —** ordered conditions remain editable without hiding the route list permanently.
-
-![Mobile reviewer decision sheet](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-11-mobile-decision.png)
-
-</details>
+![Mobile workflow route list](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-07-mobile.png)
 
 ## Problem and user outcome
 
