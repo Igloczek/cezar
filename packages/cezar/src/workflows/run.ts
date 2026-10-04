@@ -15,6 +15,7 @@ import { AUTO_END_DELAY_MS, type AgentSession } from '../core/claude-cli-runner.
 import { onUsage, registerRunProcess, unregisterRunProcess, type ProcessUsage } from '../core/process-usage.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { createRunner } from '../core/runner-factory.ts';
+import { TaskReportToolReceiver, type TaskReportGrant } from '../core/task-report-tool.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { modelConflictsWithRunner } from '../core/model-presets.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
@@ -929,6 +930,7 @@ interface PersistedAttachments {
  * The user's working tree is never touched.
  */
 export class RunManager {
+  private readonly reportTool: TaskReportToolReceiver;
   private readonly active = new Map<string, ActiveRun>();
   // Queue + `starting` set (spec 006, janitor's pump() pattern): `starting`
   // covers the window between shifting a run off the queue and the run
@@ -1045,6 +1047,7 @@ export class RunManager {
     } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
+    this.reportTool = new TaskReportToolReceiver(store);
     this.projectId = options.projectId;
     this.resolveTrackerEnv = options.resolveTrackerEnv;
     this.semaphore = options.semaphore ?? new WorkspaceSemaphore();
@@ -1072,6 +1075,7 @@ export class RunManager {
    * dispose only guarantees the manager makes no further moves on its own.
    */
   dispose(): void {
+    this.reportTool.close();
     this.offUsage();
     this.offSemaphore();
     clearInterval(this.queueWatchdog);
@@ -1178,6 +1182,13 @@ export class RunManager {
       // The tree directory — brief, notes, inbox — for a run in a dispatch tree only.
       ...(dispatch ? { CEZ_TREE_DIR: treeDir(this.dataDir, dispatch.rootRunId) } : {}),
     };
+  }
+
+  private async reportGrant(runId: string, stepId: string, backend: RunnerId): Promise<TaskReportGrant | undefined> {
+    if (backend !== 'claude' && backend !== 'codex' && backend !== 'opencode') return undefined;
+    const attempt = this.store.getRun(runId)?.steps.find((step) => step.id === stepId)?.iterations;
+    if (!attempt) throw new Error('Cannot start the report tool without a current step attempt.');
+    return this.reportTool.grant(runId, stepId, attempt);
   }
 
   /**
@@ -3841,6 +3852,14 @@ export class RunManager {
     }
     this.store.updateStep(runId, stepId, { profileId: continueProfile.profileId });
 
+    let continueReportGrant: TaskReportGrant | undefined;
+    try {
+      continueReportGrant = await this.reportGrant(runId, stepId, continueBackend);
+    } catch (err) {
+      this.store.appendEvent(runId, { type: 'note', stepId, message: `Structured report tool unavailable: ${err instanceof Error ? err.message : String(err)}` });
+    }
+    if (!continueReportGrant && !['claude', 'codex', 'opencode'].includes(continueBackend)) this.store.appendEvent(runId, { type: 'note', stepId, message: `${continueBackend} cannot register the Cezar report_task_result tool; structured in-task reports are unavailable for this session.` });
+
     const runner = createRunner(continueBackend);
     if (state.cancelled) return;
     state.currentStepId = stepId;
@@ -3862,7 +3881,8 @@ export class RunManager {
     const contextualOpeningPrompt = portableContext
       ? `${portableContext}\n\n---\n\n## New user instruction\n${openingPrompt}`
       : openingPrompt;
-    const session = runner.startSession(
+    let session: AgentSession;
+    try { session = runner.startSession(
       {
         // The Continue step is a fresh agent session on the same run — the
         // run's extra system prompt (already resolved at execute time and
@@ -3886,7 +3906,7 @@ export class RunManager {
           this.grantableAttachmentLibrary(),
           continueProfile.env,
         ),
-        env: continueProfile.env,
+        env: { ...continueProfile.env, ...continueReportGrant?.env },
         model: continueModel,
         sessionId: spawnSessionId,
         resume: sessionId !== undefined,
@@ -3894,7 +3914,12 @@ export class RunManager {
       },
       onEvent,
       { onUiEvent: (event) => this.handleRunnerUiEvent(runId, state, sink, event) },
-    );
+    ); } catch (err) {
+      continueReportGrant?.revoke();
+      failBeforeSpawn(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    void session.result.then(() => continueReportGrant?.revoke(), () => continueReportGrant?.revoke());
     state.session = session;
     state.sessionEverOpened = true;
     this.flushDeferred(runId);
@@ -4687,6 +4712,14 @@ export class RunManager {
     }
     this.store.updateStep(runId, step.id, { profileId: stepProfile.profileId });
 
+    let stepReportGrant: TaskReportGrant | undefined;
+    try {
+      stepReportGrant = await this.reportGrant(runId, step.id, stepBackend);
+    } catch (err) {
+      emit({ type: 'note', stepId: step.id, message: `Structured report tool unavailable: ${err instanceof Error ? err.message : String(err)}` });
+    }
+    if (!stepReportGrant && !['claude', 'codex', 'opencode'].includes(stepBackend)) emit({ type: 'note', stepId: step.id, message: `${stepBackend} cannot register the Cezar report_task_result tool; structured in-task reports are unavailable for this session.` });
+
     const runner = createRunner(stepBackend);
     let session: AgentSession;
     state.currentStepId = step.id;
@@ -4720,7 +4753,7 @@ export class RunManager {
             this.grantableAttachmentLibrary(),
             stepProfile.env,
           ),
-          env: stepProfile.env,
+          env: { ...stepProfile.env, ...stepReportGrant?.env },
           model: backendModel,
           sessionId,
           // Interactive sessions have no wall clock — the idle timer rules.
@@ -4747,9 +4780,11 @@ export class RunManager {
         },
       );
     } catch (err) {
+      stepReportGrant?.revoke();
       state.currentStepId = undefined;
       return err instanceof Error ? err.message : String(err);
     }
+    void session.result.then(() => stepReportGrant?.revoke(), () => stepReportGrant?.revoke());
     state.session = session;
     state.sessionEverOpened = true;
     this.flushDeferred(runId);

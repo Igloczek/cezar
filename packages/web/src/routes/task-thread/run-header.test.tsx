@@ -129,6 +129,20 @@ function renderHeader(
 
 const actionBar = () => within(document.querySelector('[data-slot="run-actions"]') as HTMLElement)
 
+describe('accepted task reports', () => {
+  it('shows the persisted claim and evidence without treating the outcome as a run status', () => {
+    stubFetch()
+    renderHeader(run('running', { taskReports: [{
+      runId: 'r1', stepId: 'task', attempt: 1, acceptedAt: '2026-10-04T00:00:00.000Z',
+      payload: { schemaVersion: 1, idempotencyKey: 'digest', outcome: 'completed', summary: 'Implementation claimed complete', data: { tests: 3 }, evidence: [{ ref: 'commit:abc' }] },
+    }] }))
+    fireEvent.click(screen.getByText('Agent reports (1)'))
+    expect(screen.getByText('Implementation claimed complete')).not.toBeNull()
+    expect(screen.getByText('Evidence: commit:abc')).not.toBeNull()
+    expect(screen.getByText('running')).not.toBeNull()
+  })
+})
+
 describe('monitoring schedule', () => {
   it('shows the exact persisted deadline in a time element', () => {
     stubFetch()

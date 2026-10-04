@@ -360,6 +360,23 @@ function RunHeaderView({
           </div>
         ) : null}
 
+        {run.taskReports?.length ? (
+          <details className="border-t border-border pt-2 text-sm">
+            <summary className="cursor-pointer font-medium">Agent reports ({run.taskReports.length})</summary>
+            <div className="mt-2 space-y-2">
+              {run.taskReports.map((report) => (
+                <div key={`${report.stepId}:${report.attempt}`} className="rounded-md border border-border p-2">
+                  <div className="font-medium">{report.payload.outcome} · {report.stepId} · attempt {report.attempt}</div>
+                  <p className="text-xs text-muted-foreground">Agent claim · not verified by Cezar</p>
+                  <p>{report.payload.summary}</p>
+                  {Object.keys(report.payload.data).length ? <pre className="mt-1 overflow-x-auto text-xs">{JSON.stringify(report.payload.data, null, 2)}</pre> : null}
+                  {report.payload.evidence.map((item, index) => <p key={index} className="text-xs text-muted-foreground">Evidence: {item.ref}{item.note ? ` — ${item.note}` : ''}</p>)}
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
+
         {hint ? <ResumeHintLine hint={hint} /> : null}
         {notesOpen ? <NotesPanel runId={run.id} /> : null}
       </div>

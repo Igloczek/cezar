@@ -58,6 +58,7 @@ export interface AgentRunSpec {
   /** Extra env vars for the agent process (merged over `process.env`) —
    *  e.g. CEZ_HANDOFF_FILE / CEZ_TODOS_FILE / CEZ_TASK_ID (spec 007). */
   env?: Record<string, string>;
+  /** A per-invocation Cezar-owned report MCP bridge is available when env carries its binding. */
   model?: string;
   /** Wall-clock kill switch for the run (ms). */
   timeoutMs?: number;

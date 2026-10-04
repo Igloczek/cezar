@@ -18,6 +18,7 @@ import { isSignalTerminationExit, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { disclaimedCommand } from './disclaim-spawn.ts';
 import { resolveClaudeBin } from './claude-bin.ts';
+import { taskReportMcpPath } from './task-report-tool.ts';
 import { costWeightedTokens, type RawUsage } from './usage.ts';
 import { readNdjson } from './ndjson.ts';
 import {
@@ -399,6 +400,10 @@ export function buildClaudeArgs(
     }
   }
   const allowed = buildAllowedTools(spec.allowedTools ?? [], spec.bashAllowlist);
+  if (spec.env?.CEZ_REPORT_SOCKET && spec.env.CEZ_REPORT_CAPABILITY) {
+    args.push('--mcp-config', JSON.stringify({ mcpServers: { cezar: { command: process.execPath, args: [taskReportMcpPath()] } } }));
+    allowed.push('mcp__cezar__report_task_result');
+  }
   if (allowed.length > 0) {
     args.push('--allowedTools', allowed.join(','));
   }
