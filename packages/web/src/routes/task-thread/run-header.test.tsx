@@ -132,7 +132,7 @@ describe('accepted task reports', () => {
   it('shows the persisted claim and evidence without treating the outcome as a run status', () => {
     stubFetch()
     renderHeader(run('running', { taskReports: [{
-      runId: 'r1', stepId: 'task', attempt: 1, acceptedAt: '2026-10-04T00:00:00.000Z',
+      runId: 'r1', stepId: 'task', attempt: 1, acceptedAt: '2026-10-04T00:00:00.000Z', payloadHash: 'a'.repeat(64),
       payload: { schemaVersion: 1, idempotencyKey: 'digest', outcome: 'completed', summary: 'Implementation claimed complete', data: { tests: 3 }, evidence: [{ ref: 'commit:abc' }] },
     }] }))
     fireEvent.click(screen.getByText('Agent reports (1)'))

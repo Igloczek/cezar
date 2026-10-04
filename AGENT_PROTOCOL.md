@@ -202,6 +202,8 @@ the same active attempt return the stored record; a conflicting second report,
 stale capability or settled run fails. The idempotency key is stored as a SHA-256
 digest. `GET /api/v1/runs/:id` and project-scoped aliases expose accepted reports
 on the run record.
+The accepted record also carries a digest of the validated original payload so
+a conflicting retry is rejected even when two secret values redact identically.
 
 | Runner | Report tool in Cezar task sessions |
 | --- | --- |

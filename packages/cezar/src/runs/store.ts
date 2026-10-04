@@ -865,6 +865,7 @@ export class RunStore extends EventEmitter {
     if (Buffer.byteLength(JSON.stringify(parsed), 'utf8') > 8192) {
       throw new Error('Report exceeds 8192 bytes. Shorten data or evidence.');
     }
+    const payloadHash = createHash('sha256').update(JSON.stringify(parsed)).digest('hex');
     const payload = taskReportPayloadSchema.parse({
       ...parsed,
       // Idempotency keys are opaque. Persist their digest so a token-shaped key
@@ -876,11 +877,11 @@ export class RunStore extends EventEmitter {
     });
     const existing = run.taskReports?.find((report) => report.stepId === stepId && report.attempt === attempt);
     if (existing) {
-      if (existing.payload.idempotencyKey === payload.idempotencyKey && JSON.stringify(existing.payload) === JSON.stringify(payload)) return existing;
+      if (existing.payload.idempotencyKey === payload.idempotencyKey && existing.payloadHash === payloadHash) return existing;
       throw new Error('A different report was already accepted for this step attempt.');
     }
     if ((run.taskReports?.length ?? 0) >= 128) throw new Error('This run reached its report limit.');
-    const accepted: AcceptedTaskReport = { runId, stepId, attempt, acceptedAt: new Date().toISOString(), payload };
+    const accepted: AcceptedTaskReport = { runId, stepId, attempt, acceptedAt: new Date().toISOString(), payloadHash, payload };
     const previous = run.taskReports;
     run.taskReports = [...(previous ?? []), accepted];
     try {

@@ -23,6 +23,8 @@ routing or change completion behavior; issue #11 owns that later step.
   result. A different submission for the same attempt fails as a conflict.
   A stale capability, settled run, or invalid payload fails without mutation.
   The stored idempotency key is a SHA-256 digest of the caller's key.
+  A second digest of the validated, unredacted submission distinguishes
+  conflicting calls whose secret values redact to the same display text.
 - The accepted report belongs to the run record and appears in its versioned
   API representation and task detail. A restart reads it from `runs.json`.
 - The capability is never written to a run record, event, log, or error message.
