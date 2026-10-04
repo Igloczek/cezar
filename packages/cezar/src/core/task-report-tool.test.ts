@@ -61,11 +61,12 @@ describe('owner-bound task report tool', () => {
     expect(claude[claude.indexOf('--allowedTools') + 1]).toContain('mcp__cezar__report_task_result');
     const codex = buildCodexAppServerArgs(env).join(' ');
     expect(codex).toContain('mcp_servers.cezar.command');
+    expect(codex).toContain('mcp_servers.cezar.env_vars=["CEZ_REPORT_SOCKET","CEZ_REPORT_CAPABILITY"]');
     expect(codex).toContain(taskReportMcpPath());
-    const opencode = JSON.parse(opencodeReportConfig(JSON.stringify({ model: 'provider/model', mcp: { servers: { other: { type: 'remote', url: 'https://example.com' } } } })));
+    const opencode = JSON.parse(opencodeReportConfig(JSON.stringify({ model: 'provider/model', mcp: { other: { type: 'remote', url: 'https://example.com' } } })));
     expect(opencode.model).toBe('provider/model');
-    expect(opencode.mcp.servers.other).toMatchObject({ type: 'remote' });
-    expect(opencode.mcp.servers.cezar.command).toEqual([process.execPath, taskReportMcpPath()]);
+    expect(opencode.mcp.other).toMatchObject({ type: 'remote' });
+    expect(opencode.mcp.cezar.command).toEqual([process.execPath, taskReportMcpPath()]);
     expect(buildCodexAppServerArgs()).toEqual(['app-server']);
     expect(buildClaudeArgs({ cwd: '/tmp', userPrompt: 'test' })).not.toContain('--mcp-config');
   });
@@ -163,5 +164,24 @@ describe('owner-bound task report tool', () => {
       data: { message: 'another-secret-value' },
       evidence: [{ ref: 'another-secret-value' }],
     })).status).toBe(409);
+  });
+
+  it('rejects secret-bearing report data keys before they reach persisted state', async () => {
+    const { run, store, receiver } = fixture();
+    store.registerRunSecrets(run.id, ['secret-credential-value']);
+    const grant = await receiver.grant(run.id, 'agent', 1);
+    const result = await post(grant.env.CEZ_REPORT_SOCKET!, grant.env.CEZ_REPORT_CAPABILITY!, {
+      ...payload,
+      data: { 'secret-credential-value': true },
+    });
+    expect(result.status).toBe(409);
+    expect(JSON.stringify(result.value)).not.toContain('secret-credential-value');
+    expect(store.getRun(run.id)?.taskReports).toBeUndefined();
+    const nested = await post(grant.env.CEZ_REPORT_SOCKET!, grant.env.CEZ_REPORT_CAPABILITY!, {
+      ...payload,
+      data: { result: { 'secret-credential-value': true } },
+    });
+    expect(nested.status).toBe(409);
+    expect(store.getRun(run.id)?.taskReports).toBeUndefined();
   });
 });

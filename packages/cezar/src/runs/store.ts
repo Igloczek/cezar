@@ -952,6 +952,13 @@ export class RunStore extends EventEmitter {
     if (Buffer.byteLength(JSON.stringify(parsed), 'utf8') > 8192) {
       throw new Error('Report exceeds 8192 bytes. Shorten data or evidence.');
     }
+    if (process.env.CEZ_REDACT_SECRETS !== '0') {
+      // Unlike event objects, report data keys are agent supplied. Reject a
+      // key that would be redacted so it cannot leak through runs.json or API.
+      const hasSecretKey = (value: unknown): boolean => value !== null && typeof value === 'object'
+        && Object.entries(value).some(([key, child]) => this.redactText(key, runId) !== key || hasSecretKey(child));
+      if (hasSecretKey(parsed.data)) throw new Error('Report data contains a secret-bearing key. Use a neutral field name.');
+    }
     const payloadHash = createHash('sha256').update(JSON.stringify(parsed)).digest('hex');
     const payload = taskReportPayloadSchema.parse({
       ...parsed,

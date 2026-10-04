@@ -685,10 +685,9 @@ class OpencodeSession implements AgentSession {
 export function opencodeReportConfig(existing?: string): string {
   const base = existing ? JSON.parse(existing) as Record<string, unknown> : {};
   const mcp = (base.mcp ?? {}) as Record<string, unknown>;
-  const servers = (mcp.servers ?? {}) as Record<string, unknown>;
   return JSON.stringify({
     ...base,
-    mcp: { ...mcp, servers: { ...servers, cezar: { type: 'local', command: [process.execPath, taskReportMcpPath()] } } },
+    mcp: { ...mcp, cezar: { type: 'local', command: [process.execPath, taskReportMcpPath()] } },
   });
 }
 

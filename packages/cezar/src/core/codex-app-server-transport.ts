@@ -47,6 +47,9 @@ export function buildCodexAppServerArgs(extraEnv?: Record<string, string>): stri
   if (extraEnv?.CEZ_REPORT_SOCKET && extraEnv.CEZ_REPORT_CAPABILITY) {
     args.push('-c', `mcp_servers.cezar.command=${JSON.stringify(process.execPath)}`);
     args.push('-c', `mcp_servers.cezar.args=${JSON.stringify([taskReportMcpPath()])}`);
+    // Codex clears most of the environment for MCP subprocesses unless the
+    // server explicitly lists the variables it may inherit.
+    args.push('-c', 'mcp_servers.cezar.env_vars=["CEZ_REPORT_SOCKET","CEZ_REPORT_CAPABILITY"]');
   }
   return args;
 }
