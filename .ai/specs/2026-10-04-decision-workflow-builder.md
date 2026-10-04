@@ -4,15 +4,29 @@
 
 ## Summary
 
-Give workflow authors a way to configure and inspect the decision graphs introduced by #11 without hand-editing YAML. Keep today's ordered chain builder and `quick-task` behavior intact. The worked example uses real Open Mercato skills: `om-ux-shape` → `om-auto-write-spec` → `om-auto-implement-spec` → independent `om-code-review` and `om-ux-review-pr` assessments → a joined decision → human review or bounded rework. The editor exposes skill inputs, runner, typed report fields, ordered conditions, worktree scope, parallel selection, join rule, and failure route before save.
+Give workflow authors a way to configure and inspect the decision graphs introduced by #11 without hand-editing YAML. Keep today's ordered chain builder and `quick-task` behavior intact. The worked example uses real Open Mercato skills: `om-ux-shape` → `om-auto-write-spec` → `om-auto-implement-spec` → a **fork into three simultaneous reviewer steps** (quality, security, UX) → a **wait-for-all join** → a decision using all three reports → human review or bounded rework. The editor exposes skill inputs, runner, typed report fields, ordered conditions, worktree scope, parallel selection, join rule, and failure route before save.
 
 Open Mercato skills are Markdown playbooks, **not** Cezar workflow definitions. Their prose, PR comments, and `PR:`/`Spec:` lines are not typed routing data. Every agent node must submit an accepted Cezar-owned report from #10; workflow-declared fields are validated before #11 selects an edge. This example is a proposed Cezar workflow assembled from real skills, not an existing Open Mercato YAML file. The original screenshot suggests the three-panel layout and visible validation. Publishing versions, production statistics, and dry-run results are outside this spec.
 
 ## Visual designs
 
-These are proposed screens with illustrative PR IDs and accepted reports. The actual Open Mercato skill names and order are sourced below; the composite and Parallel controls require the engine extension described below. Editable sources: [desktop HTML](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-flow.html), [desktop CSS](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/design.css), and [mobile HTML](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-mobile.html). Desktop images are 1600 × 1160; the mobile image is 430 × 932.
+These are proposed screens with illustrative PR IDs and accepted reports. The actual Open Mercato skill names and order are sourced below; the composite and Parallel controls require the engine extension described below. Editable sources: [full-flow HTML](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-flow.html), [parallel-review HTML](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/parallel-review.html), [desktop CSS](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/design.css), and [mobile HTML](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/open-mercato-mobile.html). Full-flow images are 1600 × 1160, reviewer-detail images are 1600 × 1080, and mobile images are 430 × 932.
 
-**Full feature flow —** real skills, two independent review branches, a join, ordered decision, bounded rework, and human terminal outcomes.
+**Fan-out configuration —** one implementation result launches three independent reviewer runs from the same frozen PR head. The author can add another reviewer; all selected branches converge on one join before the decision.
+
+![Three parallel reviewers and wait-for-all join](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-08-fanout-config.png)
+
+**Waiting state —** two of three reviewers have reported. The join remains pending and the decision cannot run.
+
+![Join waiting for the third reviewer](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-09-join-waiting.png)
+
+**Joined decision —** all three reports were accepted for one PR head. Security requested changes, so the workflow returns to implementation within its visit limit.
+
+![All reviewer reports joined before rework decision](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-10-join-decision.png)
+
+These three close-up views focus on review aggregation. The full gate also evaluates the higher-priority sensitive-change rule shown below.
+
+**Full feature flow —** real skills, three independent review branches, a wait-for-all join, ordered decision, bounded rework, and human terminal outcomes.
 
 ![Open Mercato skill workflow overview](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-01-overview.png)
 
@@ -27,21 +41,25 @@ These are proposed screens with illustrative PR IDs and accepted reports. The ac
 
 ![Nested condition builder](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-02-condition.png)
 
-**Parallel group inspector —** branch skills, frozen input, separate source worktrees, expected reports, join policy, and failure routes.
+**Parallel group inspector —** all three reviewer steps, their skills and instructions, frozen input, separate source worktrees, expected reports, join policy, and failure routes.
 
 ![Parallel review configuration](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-03-parallel.png)
 
-**Unresolved join —** one child has a valid report, the other does not; routing stops or takes the configured human route.
+**Unresolved join —** two children have valid reports, the third does not; routing stops or takes the configured human route.
 
 ![Unresolved parallel join](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-04-unresolved.png)
 
-**Run route trace —** both child reports and the ordered predicate outcomes explain the bounded rework decision.
+**Run route trace —** all three child reports and the ordered predicate outcomes explain the bounded rework decision.
 
 ![Open Mercato workflow route trace](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-05-trace.png)
 
-**Narrow layout —** the complete route list remains accessible when the selected node's inspector opens as a sheet.
+**Narrow layout —** the route list shows all three reviewer lanes and their join; the selected node's inspector opens as a sheet.
 
 ![Mobile route list and decision sheet](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-07-mobile.png)
+
+**Mobile decision sheet —** ordered conditions remain editable without hiding the route list permanently.
+
+![Mobile reviewer decision sheet](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-om-11-mobile-decision.png)
 
 </details>
 
@@ -49,7 +67,7 @@ These are proposed screens with illustrative PR IDs and accepted reports. The ac
 
 Today `packages/web/src/routes/workflows/workflows.tsx` offers an ordered canvas, skill palette, YAML preview/import/export, and an AI-assisted chain planner. `packages/cezar/src/workflows/types.ts` accepts `steps` or `skills`; a check can retry an earlier step through `onFail`. It does not author arbitrary conditional edges. #11 adds an opt-in graph format so Cezar can route from a validated report instead of agent prose. Without an editor, a user must understand node IDs, report paths, predicates, fallback edges, and visit limits in YAML before they can safely use it.
 
-**Primary job:** A developer can create and save a reusable Open Mercato feature workflow with typed report-driven decisions, an explicit fallback, a bounded rework route, and selected independent review branches that may run in parallel. Success means authors can identify the next node, frozen PR head, join policy, and failure destination before saving. A plausible project effect is fewer misconfigured runs; the guardrail is no change to existing chain workflow behavior. The need for a visual graph, as opposed to a structured form, is an assumption to validate with a prototype.
+**Primary job:** A developer can create and save a reusable Open Mercato feature workflow with typed report-driven decisions, an explicit fallback, a bounded rework route, and **multiple independently configured reviewers launched together**. Success means authors can identify every child step, frozen PR head, wait-for-all requirement, decision rule, and failure destination before saving. A plausible project effect is fewer misconfigured runs; the guardrail is no change to existing chain workflow behavior. The need for a visual graph, as opposed to a structured form, is an assumption to validate with a prototype.
 
 ## Dependencies and source of truth
 
@@ -70,29 +88,31 @@ The #10 report schema does not yet define how an author discovers routable `data
 | Save, no publish | **Save workflow** writes the file after server validation; overwrite requires confirmation. | Matches current file-backed workflow semantics. |
 | Inspect real runs | **View route** shows persisted decisions and report references. | Provides evidence without simulated success counts. |
 | No new AI in authoring | Keep the existing chain planner scoped to chains. Routing uses deterministic predicates. | A generated graph would require a separate quality bar and explicit review. |
-| Parallel only when independent | The example runs `om-code-review` and `om-ux-review-pr` on the same frozen PR head in separate worktrees, then waits for both reports. | They can assess independently; `om-auto-qa-pr` is excluded because it has a review-first gate, and `om-auto-review-pr` can autofix the PR while another reader reviews it. |
+| Configurable fan-out and wait-for-all join | The author adds reviewer branches to one fork. The example launches quality and security instances of `om-code-review` plus `om-ux-review-pr` from the same frozen PR head, then waits for **all three** reports before deciding. | A reviewer that finishes first cannot advance the workflow. More reviewers use the same pattern, subject to the workspace and dispatch caps. `om-auto-qa-pr` is excluded because it has a review-first gate, and `om-auto-review-pr` can autofix the PR while another reader reviews it. |
 
 ## Actual skill references and worked flow
 
-The sample is grounded in the public [`om-ux-shape`](https://github.com/open-mercato/skills/blob/main/skills/om-ux-shape/SKILL.md), [`om-auto-write-spec`](https://github.com/open-mercato/skills/blob/main/skills/om-auto-write-spec/SKILL.md), [`om-auto-implement-spec`](https://github.com/open-mercato/skills/blob/main/skills/om-auto-implement-spec/SKILL.md), [`om-code-review`](https://github.com/open-mercato/skills/blob/main/skills/om-code-review/SKILL.md), and [`om-ux-review-pr`](https://github.com/open-mercato/skills/blob/main/skills/om-ux-review-pr/SKILL.md) definitions. `om-auto-write-spec` opens a spec PR, and `om-auto-implement-spec` opens or resumes an implementation PR and performs its own review/UI verification. The final two parallel nodes are **extra independent assessments**, so this fork is opt-in rather than a default cost for every feature. [`om-auto-qa-pr`](https://github.com/open-mercato/skills/blob/main/skills/om-auto-qa-pr/SKILL.md) runs after review by its own contract and must not be selected as a simultaneous peer of code review.
+The sample is grounded in the public [`om-ux-shape`](https://github.com/open-mercato/skills/blob/main/skills/om-ux-shape/SKILL.md), [`om-auto-write-spec`](https://github.com/open-mercato/skills/blob/main/skills/om-auto-write-spec/SKILL.md), [`om-auto-implement-spec`](https://github.com/open-mercato/skills/blob/main/skills/om-auto-implement-spec/SKILL.md), [`om-code-review`](https://github.com/open-mercato/skills/blob/main/skills/om-code-review/SKILL.md), and [`om-ux-review-pr`](https://github.com/open-mercato/skills/blob/main/skills/om-ux-review-pr/SKILL.md) definitions. `om-auto-write-spec` opens a spec PR, and `om-auto-implement-spec` opens or resumes an implementation PR and performs its own review/UI verification. The fork contains **three independently configured reviewer steps**: two invocations of `om-code-review` with distinct instructions (general quality and security/privacy) and one `om-ux-review-pr`. These are extra assessments, so the fork is opt-in rather than a default cost for every feature. [`om-auto-qa-pr`](https://github.com/open-mercato/skills/blob/main/skills/om-auto-qa-pr/SKILL.md) runs after review by its own contract and must not be selected as a simultaneous peer of code review.
 
 ```mermaid
 flowchart TD
   A[om-ux-shape] --> B[om-auto-write-spec]
   B --> C[om-auto-implement-spec]
   C --> F{Parallel review at frozen PR head}
-  F --> D[om-code-review]
-  F --> E[om-ux-review-pr]
-  D --> J[Join: both accepted reports]
+  F --> D[om-code-review: quality]
+  F --> S[om-code-review: security]
+  F --> E[om-ux-review-pr: UX]
+  D --> J[Join: all three accepted reports at one head]
+  S --> J
   E --> J
   J --> G{Ordered typed conditions}
   G -- sensitive change --> H[Needs human review]
-  G -- both assessments pass --> I[Ready for human review]
-  G -- other result, visits remain --> C
+  G -- any reviewer requests fixes, visits remain --> C
+  G -- all three pass --> I[Ready for human review]
   G -- exhausted or unresolved --> H
 ```
 
-Every skill node has a Cezar report contract in addition to its skill instructions. A PR number, spec path, verdict, finding count, or risk field in the report is an **agent claim** until a check or human verifies it. The two reviewer nodes must assess the same immutable `headSha`; their child runs never merge changes back into the parent automatically.
+Every skill node has a Cezar report contract in addition to its skill instructions. A PR number, spec path, verdict, finding count, or risk field in the report is an **agent claim** until a check or human verifies it. The three reviewer nodes must assess the same immutable `headSha`; their child runs never merge changes back into the parent automatically.
 
 ### Full proposed YAML
 
@@ -102,7 +122,7 @@ This is a **target configuration**, not syntax accepted by today's loader. `ceza
 format: cezar.graph/v2 # proposed extension after #11
 name: open-mercato-feature-flow
 start: shape
-limits: { maxTransitions: 24, maxParallelChildren: 2 }
+limits: { maxTransitions: 24, maxParallelChildren: 3 }
 nodes:
   shape:
     kind: agent
@@ -136,13 +156,24 @@ nodes:
     kind: fork # requires a post-#11 engine extension
     snapshot: { from: implement.data.headSha, verifyCurrentPrHead: true }
     branches:
-      code: { start: codeReview, scope: source_read_only }
+      quality: { start: qualityReview, scope: source_read_only }
+      security: { start: securityReview, scope: source_read_only }
       ux: { start: uxReview, scope: source_read_only, externalActions: [pr_comment] }
     join: reviewJoin
-  codeReview:
+  qualityReview:
     kind: agent
     skill: om-code-review
-    prompt: "Review the frozen implementation head; submit a Cezar report."
+    runner: codex
+    prompt: "Review architecture and code quality at the frozen head; report a verdict."
+    reportFields:
+      verdict: { type: enum, values: [approve, changes], required: true }
+      reviewedHead: { type: git_sha, required: true }
+    next: reviewJoin
+  securityReview:
+    kind: agent
+    skill: om-code-review
+    runner: codex
+    prompt: "Review security and privacy risks at the frozen head; report a verdict."
     reportFields:
       verdict: { type: enum, values: [approve, changes], required: true }
       reviewedHead: { type: git_sha, required: true }
@@ -150,6 +181,7 @@ nodes:
   uxReview:
     kind: agent
     skill: om-ux-review-pr
+    runner: codex
     prompt: "Walk the UI at the frozen implementation head; submit a Cezar report."
     reportFields:
       blockingFindings: { type: integer, min: 0, required: true }
@@ -158,9 +190,11 @@ nodes:
     next: reviewJoin
   reviewJoin:
     kind: join
-    mode: all # wait for both; no first-winner cancellation
+    mode: all # wait for all three; no first-winner cancellation
     requireAcceptedReports: true
+    requireSameHead: true
     onUnresolved: needsHuman
+    onFailed: needsHuman
     onStaleHead: needsHuman
     next: gate
   gate:
@@ -174,16 +208,23 @@ nodes:
                 - { field: implement.data.touchesAuth, op: eq, value: true }
                 - { field: implement.data.touchesMoney, op: eq, value: true }
         next: needsHuman
-      - label: Both assessments pass
+      - label: Any reviewer requests fixes while visits remain
         when:
           all:
-            - { field: codeReview.data.verdict, op: eq, value: approve }
+            - { field: implement.visits, op: lt, value: 2 }
+            - any:
+                - { field: qualityReview.data.verdict, op: eq, value: changes }
+                - { field: securityReview.data.verdict, op: eq, value: changes }
+                - { field: uxReview.data.blockingFindings, op: gt, value: 0 }
+        next: implement
+      - label: All three assessments pass
+        when:
+          all:
+            - { field: qualityReview.data.verdict, op: eq, value: approve }
+            - { field: securityReview.data.verdict, op: eq, value: approve }
             - { field: uxReview.data.blockingFindings, op: eq, value: 0 }
             - { field: uxReview.data.screensReviewed, op: gte, value: 1 }
         next: readyForHuman
-      - label: Rework while visits remain
-        when: { field: implement.visits, op: lt, value: 2 }
-        next: implement
     otherwise: needsHuman
   readyForHuman: { kind: end, outcome: review }
   needsHuman: { kind: end, outcome: blocked }
@@ -199,11 +240,13 @@ Rules run in their visible order and the first match wins; **Otherwise** is mand
 
 ### Parallel selection and join semantics
 
-The author adds **Parallel group**, chooses two or more branch skills, and sets each **Runner**, **Input**, **Frozen repository/ref**, **Source worktree scope**, **External actions**, and **Expected report fields**. The group inspector offers **Run these branches together**, **Wait for all**, **Maximum concurrent children**, **When a branch cannot finish**, and **Join destination**. Initial join mode is **Wait for all**; first-success/race joins are deferred because sibling cancellation and side effects require a separate policy. Copy: **Each branch starts from the same committed PR head in its own worktree. Changes are never merged automatically.** A write-capable skill cannot be labeled source-read-only; parallel writers require a later disjoint-scope and merge policy. A source-read-only child may still post a PR comment when the author explicitly allows that external action.
+The author adds **Parallel group**, then **Add reviewer** creates another branch card and connection to the same join. Each branch has a unique author-editable label and stable ID, **Skill**, **Runner**, **Instructions/focus**, **Input**, **Frozen repository/ref**, **Source worktree scope**, **External actions**, and **Expected report fields**. The same skill may appear in more than one branch, as quality and security `om-code-review` do here; reports are keyed by branch ID, not skill name. Removing a branch removes its connection and invalidates rules that still reference its fields; reordering changes display order only, never the wait policy or decision priority. The join shows **3 required reviewer reports** and updates its count when the author adds or removes a branch. With fewer than two branches, save is blocked until the group is repaired or removed.
 
-The fork records parent run, frozen commit, branch IDs, child run IDs, accepted report references, admission/budget allocation, and join state before launching children. Existing task dispatch supplies separate child worktrees, a four-in-flight cap, and parent summaries, but `cez task report` is distinct from #10's accepted in-task report. A join routes only from valid #10 reports for the correct child run/step/attempt. It persists one idempotent result after every required child settles. Workspace `maxParallel`, dispatch caps, and carved-out budgets still apply; extra children queue visibly. A parked parent releases its execution slot and wakes on child settlement or recovery. Restart cannot duplicate a child or skip a join; cancel and human review remain authoritative.
+The group inspector offers **Launch selected branches together**, **Wait for all**, **Maximum concurrent children**, **When a branch cannot finish**, and **Join destination**. Initial join mode is **Wait for all**; first-success/race joins are deferred because sibling cancellation and side effects require a separate policy. Copy: **Each branch starts from the same committed PR head in its own worktree. Changes are never merged automatically.** A write-capable skill cannot be labeled source-read-only; parallel writers require a later disjoint-scope and merge policy. A source-read-only child may still post a PR comment when the author explicitly allows that external action.
 
-`all_completed` requires every child to settle successfully with a valid report at the same frozen head. Missing/invalid report, timeout, unavailable runner, or canceled child gives `unresolved`; a changed PR head gives `stale`; a failed child gives `failed`. Each takes an explicit configured edge or stops with a useful reason. A valid sibling report never hides another branch's failure. The run UI shows every child as **Queued**, **Running**, **Reported**, **Failed**, **Canceled**, **Stale**, or **Unresolved**, linked to its child run. No implicit sibling cancellation or automatic branch merge.
+The fork freezes the **required branch set** for that visit and records parent run, frozen commit, branch IDs, child run IDs, accepted report references, admission/budget allocation, and join state before launching children. Existing task dispatch supplies separate child worktrees, a four-in-flight cap, and parent summaries, but `cez task report` is distinct from #10's accepted in-task report. A join routes only from valid #10 reports for the correct child run/step/attempt. It persists one idempotent result **only after every required child has reached a terminal state**. A child requesting changes never short-circuits another running reviewer. Workspace `maxParallel`, dispatch caps, and carved-out budgets still apply; extra children queue visibly and still count as pending. A parked parent releases its execution slot and wakes on child settlement or recovery. Restart cannot duplicate a child or skip a join; cancel and human review remain authoritative.
+
+`all_completed` requires every child to settle successfully with a valid report at the same frozen head. Missing/invalid report, timeout, unavailable runner, or canceled child gives `unresolved`; a changed PR head gives `stale`; a failed child gives `failed`. The join waits for every branch to settle, then takes an explicit configured failure edge or stops with a useful reason; a timeout must turn a stuck child into a terminal unresolved result. A valid sibling report never hides another branch's failure. The run UI shows **0/3, 1/3, 2/3, 3/3 accepted reports**, every child as **Queued**, **Running**, **Reported**, **Failed**, **Canceled**, **Stale**, or **Unresolved**, and a link to each child run. **The decision remains locked at 2/3**. After 3/3, it evaluates all reports: any quality/security `changes` verdict or UX blocker enters bounded rework; all three passing enters human review; unmatched or exhausted outcomes enter Needs human review. No implicit sibling cancellation or automatic branch merge.
 
 ## Screens and interaction
 
@@ -240,11 +283,11 @@ At desktop width, use three regions: a left step palette, a central connected fl
 
 **Decision/route inspector:** ordered rule cards. Each card has **Match all / Match any**, **Add condition**, **Add group**, typed **Report field**, **Operator**, **Value**, and **Next step**, plus a plain-language **Reads as** summary. Start with #11's operators; show numeric and nested-group controls only when the later contract exists. Final row: **Otherwise → [step]**. A route with no fallback is blocking. For a backward route, show **Maximum visits**, **When exhausted**, and the destination. The field picker uses declared reports, not arbitrary paths. No free-form expression editor.
 
-**Parallel group inspector:** **Branches** lists each selected skill, runner, input, frozen PR head, read-only worktree scope, and expected report; **Add branch** adds another. **Join policy: Wait for all** and **Maximum concurrent children** sit below. Explain queued branches and worktree isolation. **When a branch cannot finish** names an explicit route. If the engine lacks fork/join, the control explains **Requires a newer workflow engine** and cannot be saved as runnable.
+**Parallel group inspector:** **Reviewer branches** lists each stable branch ID, editable label, skill, instructions/focus, runner, input, frozen PR head, read-only worktree scope, external actions, and expected report. **Add reviewer** adds another lane and join connection; **Remove reviewer** asks for confirmation if a decision references that branch. The header says **All 3 reviewer reports required** and updates as branches change. **Join policy: Wait for all** and **Maximum concurrent children** sit below. Explain queued branches and worktree isolation. **When a branch cannot finish** names an explicit route. If the engine lacks fork/join, the control explains **Requires a newer workflow engine** and cannot be saved as runnable.
 
 **End inspector:** **Outcome** with **Complete**, **Needs review**, or **Fail**, only where those outcomes map to #11's actual terminal states. Do not promise a new lifecycle state from UI copy alone.
 
-**Problems to fix:** persistent list of server-authoritative validation errors, each focusing the node or route. Examples: **“Review gate” has no Otherwise route. Add one before saving.**; **The route back to “Implement” needs a visit limit.**; **Code review and UX review must use the same PR head.**; **No terminal path is reachable from “Start”.** A warning that is not blocking must say so explicitly. Do not display invented run counts or a “safe to publish” claim.
+**Problems to fix:** persistent list of server-authoritative validation errors, each focusing the node or route. Examples: **“Review gate” has no Otherwise route. Add one before saving.**; **The route back to “Implement” needs a visit limit.**; **All reviewer branches must use the same PR head.**; **The decision still references a removed reviewer. Update its rule.**; **No terminal path is reachable from “Start”.** A warning that is not blocking must say so explicitly. Do not display invented run counts or a “safe to publish” claim.
 
 **Save:** submit through the versioned workflow route using the #11 graph schema. Validate client-side for timely feedback, then trust the server result. Keep the draft in memory on request failure. Show **Workflow wasn’t saved: [server reason]. Fix the highlighted item and try again.** Existing-file collision retains the current overwrite confirmation; its cancel action leaves the draft intact. After save, show **Saved workflow** and make the file available in the task workflow picker. Saving a changed definition must not mutate a running task's persisted definition; confirm this engine assumption during implementation.
 
@@ -267,9 +310,9 @@ Missing or rejected report: **No accepted report was received for this attempt. 
 | Load or import error | Exact file/parse reason; no partial replacement of the current draft. | Correct YAML and retry; return to the draft. |
 | No accepted report in a run | **No accepted report was received for this attempt. Routing stopped.** | **Open run** to inspect and continue through existing controls. |
 | Absent optional report field | **This field was absent; its comparison did not match.** | Add an explicit presence rule or follow Otherwise. |
-| Parallel capacity full | **2 review branches queued for an available slot.** | Inspect queue; no hidden extra process is started. |
+| Parallel capacity full | **1 of 3 reviewers is queued for an available slot. The join is waiting for all 3.** | Inspect queue; no hidden extra process is started. |
 | Child failed or never reported | **Code review stopped before submitting a report. The join did not continue.** | **Open child run**; follow an explicit unresolved route or stop. |
-| PR changes after fork | **The PR changed while reviews were running. Review the new head before continuing.** | Rerun both branches on a new frozen head. |
+| PR changes after fork | **The PR changed while reviews were running. Review the new head before continuing.** | Rerun all required reviewer branches on a new frozen head. |
 | Loop limit exhausted | **The rework limit was reached. This workflow needs human review.** | Open run and route to the configured human/blocked terminal. |
 
 Keyboard users must be able to add, select, reorder where meaningful, connect, edit, and remove nodes without drag gestures. Visible focus, readable route labels, and non-color status cues are required. Confirm accessible graph interaction with a prototype before choosing a canvas library.
@@ -293,10 +336,10 @@ Keyboard users must be able to add, select, reorder where meaningful, connect, e
 4. Given a completed graph run, **View route** shows the persisted accepted report reference, conditions considered, chosen edge, visit counts, and stop reason. A refresh or restart yields the same trace.
 5. Given missing or invalid report and exhausted nudge attempts, the trace shows an unresolved stop, never a success edge. Cancel and human review still take precedence.
 6. Keyboard and touch users can complete the example graph without pointer drag. The route list exposes all conditions and limits in text.
-7. Once the later extension exists, a user can select `om-code-review` and `om-ux-review-pr` as read-only parallel branches, configure **Wait for all**, and author an **All** group containing an **Any** group and numeric comparison. Saving rejects unsupported combinations; a run records both accepted child reports and one durable join result.
-8. Given either child missing a report, failing, or reviewing a stale PR head, the join never takes its success edge. A restart before or after child launch or edge selection cannot duplicate work or change the chosen result.
+7. Once the later extension exists, a user can add three parallel reviewer branches, including two distinct instances of `om-code-review` and one `om-ux-review-pr`, configure **Wait for all**, and author an **All** group containing an **Any** group and numeric comparison. Saving rejects unsupported combinations and dangling references after branch removal; a run records all three accepted child reports and one durable join result.
+8. Given only two of three accepted reports, the decision remains unevaluated even if one of those reports requests changes. After the third child settles, the join evaluates exactly once from the frozen required set. Given any child missing a report, failing, or reviewing a stale PR head, the join never takes its success edge. A restart before or after child launch or edge selection cannot duplicate work or change the chosen result.
 
-**Delivery sequence:** (A) #11-compatible simple editor and trace; (B) bounded composite predicate AST plus field declarations; (C) durable fork/join execution over isolated children; (D) parallel authoring and run-history UI. Each step must leave legacy chains working. The later UI is enabled only with its matching engine support. The implementation agent should test the example flow end to end with mock agents that submit real accepted reports, including both child settlement orders, an unresolved child, a stale head, capacity queueing, and crash recovery.
+**Delivery sequence:** (A) #11-compatible simple editor and trace; (B) bounded composite predicate AST plus field declarations; (C) durable fork/join execution over isolated children; (D) parallel authoring and run-history UI. Each step must leave legacy chains working. The later UI is enabled only with its matching engine support. The implementation agent should test the example flow end to end with mock agents that submit real accepted reports, including multiple child settlement orders, 2/3 waiting, one reviewer requesting changes before the third finishes, an unresolved child, a stale head, capacity queueing, and crash recovery.
 
 Verification: meaningful route/UI tests for save validation, branch/fallback/loop authoring, import of both formats, unsaved-change recovery, unsupported runner, and persisted run trace; server contract parity, route parity, typed bodies, and legacy-workflow regression tests. Run the repository's required typecheck, test, build, and package checks for the implementation PR.
 
