@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
+import { taskReportMcpPath } from './task-report-tool.ts';
 import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, KILL_GRACE_MS } from './claude-cli-runner.ts';
 
 export interface CodexAppServerMessage {
@@ -31,13 +32,21 @@ export function spawnCodexAppServer(
   extraEnv?: Record<string, string>,
 ): ChildProcessWithoutNullStreams {
   try {
-    return nodeSpawn(bin, ['app-server'], {
-      cwd,
-      env: buildCodexAppServerEnv(extraEnv),
-    });
+    const env = buildCodexAppServerEnv(extraEnv);
+    const args = buildCodexAppServerArgs(extraEnv);
+    return nodeSpawn(bin, args, { cwd, env });
   } catch (error) {
     throw codexSpawnError(error, bin);
   }
+}
+
+export function buildCodexAppServerArgs(extraEnv?: Record<string, string>): string[] {
+  const args = ['app-server'];
+  if (extraEnv?.CEZ_REPORT_SOCKET && extraEnv.CEZ_REPORT_CAPABILITY) {
+    args.push('-c', `mcp_servers.cezar.command=${JSON.stringify(process.execPath)}`);
+    args.push('-c', `mcp_servers.cezar.args=${JSON.stringify([taskReportMcpPath()])}`);
+  }
+  return args;
 }
 
 /** Minimal newline-JSON request correlator shared by runs and short-lived discovery. */

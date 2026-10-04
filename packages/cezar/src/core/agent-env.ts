@@ -324,6 +324,7 @@ export function buildChildEnv(opts: BuildChildEnvOptions): NodeJS.ProcessEnv {
   if (isTruthy(readVar(source, 'CEZ_AGENT_ENV_FULL'))) {
     const full: NodeJS.ProcessEnv = {};
     for (const [name, value] of Object.entries(source)) {
+      if (name.toUpperCase() === 'CEZ_REPORT_SOCKET' || name.toUpperCase() === 'CEZ_REPORT_CAPABILITY') continue;
       if (!overridden.has(name.toUpperCase())) full[name] = value;
     }
     return { ...full, ...extra };
@@ -363,6 +364,9 @@ export function buildChildEnv(opts: BuildChildEnvOptions): NodeJS.ProcessEnv {
   /** `name` is matched normalized; the caller keeps the original spelling. */
   function allow(name: string): boolean {
     const key = name.toUpperCase();
+    // A report capability belongs to one invocation; nested Cezar processes
+    // must not inherit it through the otherwise broad CEZ_* pass-through.
+    if (key === 'CEZ_REPORT_SOCKET' || key === 'CEZ_REPORT_CAPABILITY') return false;
     // cezar's own namespace (CEZ_DRY_RUN plumbing, mock hooks, run wiring).
     if (key.startsWith('CEZ_')) return true;
     // Backend auth + gh handoff + the cloud creds an active Bedrock/Vertex

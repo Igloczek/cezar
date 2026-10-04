@@ -10,6 +10,7 @@ import type {
 import type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
 import { buildChildEnv } from './agent-env.ts';
+import { taskReportMcpPath } from './task-report-tool.ts';
 import { AUTO_END_DELAY_MS, DEFAULT_RUN_TIMEOUT_MS } from './claude-cli-runner.ts';
 import { parseModelIdentity } from './model-identity.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';
@@ -168,10 +169,11 @@ class OpencodeSession implements AgentSession {
     // Random high port; the actual bound URL is read back from stdout.
     const port = 40000 + Math.floor(Math.random() * 20000);
     try {
-      this.child = nodeSpawn(bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], {
-        cwd: spec.cwd,
-        env: buildChildEnv({ backend: 'opencode', extraEnv: spec.env }),
-      });
+      const env = buildChildEnv({ backend: 'opencode', extraEnv: spec.env });
+      if (spec.env?.CEZ_REPORT_SOCKET && spec.env.CEZ_REPORT_CAPABILITY) {
+        env.OPENCODE_CONFIG_CONTENT = opencodeReportConfig(env.OPENCODE_CONFIG_CONTENT);
+      }
+      this.child = nodeSpawn(bin, ['serve', '--hostname', '127.0.0.1', '--port', String(port)], { cwd: spec.cwd, env });
     } catch (err) {
       throw wrapSpawnError(err, bin);
     }
@@ -676,6 +678,16 @@ class OpencodeSession implements AgentSession {
       // v2 mapping is best-effort; v1 consumers stay unaffected.
     }
   }
+}
+
+export function opencodeReportConfig(existing?: string): string {
+  const base = existing ? JSON.parse(existing) as Record<string, unknown> : {};
+  const mcp = (base.mcp ?? {}) as Record<string, unknown>;
+  const servers = (mcp.servers ?? {}) as Record<string, unknown>;
+  return JSON.stringify({
+    ...base,
+    mcp: { ...mcp, servers: { ...servers, cezar: { type: 'local', command: [process.execPath, taskReportMcpPath()] } } },
+  });
 }
 
 // ---- helpers --------------------------------------------------------------
