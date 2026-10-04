@@ -29,6 +29,8 @@ export const acceptedTaskReportSchema = z.object({
   stepId: z.string(),
   attempt: z.number().int().positive(),
   acceptedAt: z.string().datetime(),
+  /** Digest of the validated submission before redaction, for exact retry checks. */
+  payloadHash: z.string().regex(/^[0-9a-f]{64}$/),
   payload: taskReportPayloadSchema,
 });
 export type AcceptedTaskReport = z.infer<typeof acceptedTaskReportSchema>;

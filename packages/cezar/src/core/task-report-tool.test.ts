@@ -156,5 +156,12 @@ describe('owner-bound task report tool', () => {
     expect(result.status).toBe(200);
     expect(JSON.stringify(result.value)).not.toContain('secret-credential-value');
     expect(JSON.stringify(store.getRun(run.id)?.taskReports)).not.toContain('secret-credential-value');
+    store.registerRunSecrets(run.id, ['another-secret-value']);
+    expect((await post(grant.env.CEZ_REPORT_SOCKET!, grant.env.CEZ_REPORT_CAPABILITY!, {
+      ...payload,
+      summary: 'Observed another-secret-value',
+      data: { message: 'another-secret-value' },
+      evidence: [{ ref: 'another-secret-value' }],
+    })).status).toBe(409);
   });
 });
