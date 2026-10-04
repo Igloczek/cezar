@@ -8,6 +8,39 @@ Give workflow authors a way to configure and inspect the decision graphs introdu
 
 The attached design reference suggests the three-panel layout and visible validation. Its version publishing, production statistics, and dry-run results are **not** part of this spec: the current workflow product saves YAML files, and #10/#11 do not supply those capabilities.
 
+## Visual designs
+
+These are proposed screens for implementation, with illustrative workflow and run data. They show layout, hierarchy, labels, route visibility, selection, and validation; the final #10/#11 contracts remain authoritative for data fields and terminal states. The editable HTML sources are [`mockups.html`](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockups.html) and [`mobile.html`](https://github.com/Igloczek/cezar/blob/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mobile.html). Desktop canvases are 1600 × 1000; the narrow layout is 430 × 900.
+
+**Decision editor —** palette, connected flow, text route list, decision inspector, and save checks:
+
+![Decision workflow editor](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-02-editor.png)
+
+<details>
+<summary>See the other five screens: library, bounded retry, validation, run trace, and narrow layout</summary>
+
+**Library and workflow-type choice**
+
+![Workflow library and new-workflow choice](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-01-library.png)
+
+**Bounded retry selected** — the inspector names the return target, visit limit, and exhaustion destination.
+
+![Bounded retry route inspector](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-03-bounded-loop.png)
+
+**Blocking validation** — the canvas, route list, inspector, and problem bar agree on the missing fallback.
+
+![Missing fallback validation state](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-04-validation.png)
+
+**Run route trace** — persisted report and edge choice explain the route after a run.
+
+![Read-only run route trace](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-05-route-trace.png)
+
+**Narrow layout** — the route list stays readable while the selected node opens in a sheet.
+
+![Narrow route list and inspector sheet](https://raw.githubusercontent.com/Igloczek/cezar/cez/e62871cb/.ai/specs/assets/decision-workflow-builder/mockup-06-mobile-route-list.png)
+
+</details>
+
 ## Problem and user outcome
 
 Today `packages/web/src/routes/workflows/workflows.tsx` offers an ordered canvas, skill palette, YAML preview/import/export, and an AI-assisted chain planner. `packages/cezar/src/workflows/types.ts` accepts `steps` or `skills`; a check can retry an earlier step through `onFail`. It does not author arbitrary conditional edges. #11 adds an opt-in graph format so Cezar can route from a validated report instead of agent prose. Without an editor, a user must understand node IDs, report paths, predicates, fallback edges, and visit limits in YAML before they can safely use it.
